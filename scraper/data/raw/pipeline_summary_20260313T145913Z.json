@@ -1,0 +1,16 @@
+{
+  "scrape_run_id": "6ab02e44-8f06-457e-bd84-2803c7d9cd15",
+  "total_queries": 20,
+  "discovered_total": 400,
+  "unique_videos": 356,
+  "scraped_ok": 356,
+  "scraped_failed": 0,
+  "persisted_ok": 338,
+  "persisted_skipped": 18,
+  "persist_failed": 0,
+  "comments_written": 6787,
+  "unique_authors": 307,
+  "started_at": "2026-03-13T14:59:13.424008+00:00",
+  "ended_at": "2026-03-13T17:50:27.428804+00:00",
+  "duration_sec": 10274
+}

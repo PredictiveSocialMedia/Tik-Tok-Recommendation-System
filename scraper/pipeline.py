@@ -345,16 +345,17 @@ def _discover_query_with_selenium(
     query: str,
     limit: int,
     headless: bool,
+    ms_token: Optional[str] = None,
 ) -> list[VideoCandidate]:
     driver = create_driver(headless=headless)
     try:
         search_text = query if mode == "keyword" else f"#{query.lstrip('#')}"
         search_url = f"https://www.tiktok.com/search/video?q={quote_plus(search_text)}"
         driver.get(search_url)
-        time.sleep(2.0)
+        time.sleep(5.0)
         dismiss_communication_banner(driver)
         dismiss_cookie_banner(driver)
-        time.sleep(0.5)
+        time.sleep(1.5)
 
         urls: list[str] = []
         seen_urls: set[str] = set()
@@ -440,6 +441,7 @@ def _discover_query_candidates(
         query=query,
         limit=config.per_query_video_limit,
         headless=config.headless,
+        ms_token=ms_token, 
     )
 
 
