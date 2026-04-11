@@ -19,27 +19,4 @@ This repo is a lightweight scaffold for TikTok-style recommendation experiments.
 - `.github/workflows/ci.yml` � CI skeleton for lint + tests on PRs.
 - `Makefile` � convenience targets.
 
-## Getting Started
 
-1) Create a virtualenv and install deps:
-   ```bash
-   python -m venv .venv && source .venv/bin/activate
-   pip install -r requirements.txt
-   ```
-2) Validate mocked data:
-   ```bash
-   make validate-data
-   ```
-3) Run baseline stats and generate a starter report:
-   ```bash
-   make baseline
-   ```
-4) Try a placeholder retrieval query:
-   ```bash
-   make query
-   ```
-
-## Notes
-
-- All logic is minimal by design. Replace TODOs with real implementations.
-- Retrieval comparisons (TF-IDF vs SBERT vs BM25 vs FAISS) live in `src/research/`.
