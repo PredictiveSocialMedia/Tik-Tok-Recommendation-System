@@ -8,10 +8,10 @@ on:
         required: true
         default: "scraper/configs/full_scale.yaml"
       skip_existing:
-        description: "Skip already persisted videos"
+        description: "Skip already persisted videos (false = update/upsert existing videos)"
         required: true
         type: boolean
-        default: true
+        default: false
       no_resume:
         description: "Ignore checkpoint table and rerun all sources"
         required: true
@@ -20,11 +20,11 @@ on:
       comments:
         description: "Comments per video"
         required: true
-        default: "5"
+        default: "0"
       replies:
         description: "Replies per comment"
         required: true
-        default: "2"
+        default: "0"
       delay:
         description: "Delay between sources (seconds)"
         required: true
@@ -60,10 +60,10 @@ jobs:
       MS_TOKEN: ${{ secrets.MS_TOKEN }}
       SCRAPER_SCHEDULE_ENABLED: ${{ vars.SCRAPER_SCHEDULE_ENABLED || 'true' }}
       SCRAPER_CONFIG_PATH: ${{ vars.SCRAPER_CONFIG_PATH || 'scraper/configs/full_scale.yaml' }}
-      SCRAPER_SKIP_EXISTING: ${{ vars.SCRAPER_SKIP_EXISTING || 'true' }}
+      SCRAPER_SKIP_EXISTING: ${{ vars.SCRAPER_SKIP_EXISTING || 'false' }}
       SCRAPER_NO_RESUME: ${{ vars.SCRAPER_NO_RESUME || 'true' }}
-      SCRAPER_COMMENTS: ${{ vars.SCRAPER_COMMENTS || '5' }}
-      SCRAPER_REPLIES: ${{ vars.SCRAPER_REPLIES || '2' }}
+      SCRAPER_COMMENTS: ${{ vars.SCRAPER_COMMENTS || '0' }}
+      SCRAPER_REPLIES: ${{ vars.SCRAPER_REPLIES || '0' }}
       SCRAPER_DELAY: ${{ vars.SCRAPER_DELAY || '15' }}
       SCRAPER_RETRY_EMPTY: ${{ vars.SCRAPER_RETRY_EMPTY || '2' }}
       SCRAPER_MAX_CONSECUTIVE_EMPTY: ${{ vars.SCRAPER_MAX_CONSECUTIVE_EMPTY || '5' }}
@@ -71,6 +71,8 @@ jobs:
       TIKTOK_BROWSER: ${{ vars.TIKTOK_BROWSER || 'webkit' }}
       SCRAPER_DB_COMMIT_EVERY: ${{ vars.SCRAPER_DB_COMMIT_EVERY || '50' }}
       TIKTOK_MAX_SESSION_RECOVERIES: ${{ vars.TIKTOK_MAX_SESSION_RECOVERIES || '3' }}
+      TIKTOK_COMMENT_CIRCUIT_MIN_ATTEMPTS: ${{ vars.TIKTOK_COMMENT_CIRCUIT_MIN_ATTEMPTS || '12' }}
+      TIKTOK_COMMENT_CIRCUIT_FAIL_RATE: ${{ vars.TIKTOK_COMMENT_CIRCUIT_FAIL_RATE || '0.60' }}
       INPUT_CONFIG_PATH: ${{ github.event.inputs.config_path }}
       INPUT_SKIP_EXISTING: ${{ github.event.inputs.skip_existing }}
       INPUT_NO_RESUME: ${{ github.event.inputs.no_resume }}
@@ -153,18 +155,6 @@ jobs:
           echo "retry_empty=$RETRY_EMPTY" >> "$GITHUB_OUTPUT"
           echo "max_consecutive_empty=$MAX_CONSECUTIVE_EMPTY" >> "$GITHUB_OUTPUT"
 
-      - name: Write optional proxies file
-        id: proxies
-        env:
-          SCRAPER_PROXIES: ${{ secrets.SCRAPER_PROXIES }}
-        run: |
-          if [ -n "$SCRAPER_PROXIES" ]; then
-            printf "%s\n" "$SCRAPER_PROXIES" > /tmp/scraper_proxies.txt
-            echo "path=/tmp/scraper_proxies.txt" >> "$GITHUB_OUTPUT"
-          else
-            echo "path=" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Init DB schema
         run: |
           python -m scraper init-db
@@ -192,10 +182,6 @@ jobs:
           if [ "${{ steps.params.outputs.no_resume }}" = "true" ]; then
             CMD+=(--no-resume)
           fi
-          if [ -n "${{ steps.proxies.outputs.path }}" ]; then
-            CMD+=(--proxies-file "${{ steps.proxies.outputs.path }}")
-          fi
-
           printf 'Running command: %q ' "${CMD[@]}"
           echo
           "${CMD[@]}"

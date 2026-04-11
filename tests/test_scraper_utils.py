@@ -76,16 +76,13 @@ modes_enabled: ["keyword", "hashtag"]
 output_raw_jsonl:
   enabled: true
   path: "raw/out.jsonl"
-proxies_file: "proxies.txt"
 """,
         encoding="utf-8",
     )
-    (tmp_path / "proxies.txt").write_text("http://127.0.0.1:8080\n", encoding="utf-8")
     loaded = scraper_config.load_pipeline_config(cfg)
     assert loaded.keywords == ["k1"]
     assert loaded.hashtags == ["h1"]
     assert loaded.output_raw_jsonl is True
-    assert loaded.proxies_file and loaded.proxies_file.endswith("proxies.txt")
 
 
 def test_read_structured_config_json(tmp_path: Path):
@@ -190,12 +187,6 @@ def test_pipeline_helpers_cover_edge_cases(tmp_path: Path):
     )
     assert len(candidates) == 1
 
-    assert pipeline._parse_proxy_line("http://127.0.0.1:8080") == {"server": "http://127.0.0.1:8080"}
-    assert pipeline._parse_proxy_line("bad") is None
-    proxies = tmp_path / "proxies.txt"
-    proxies.write_text("http://127.0.0.1:8080\n", encoding="utf-8")
-    assert pipeline._load_random_proxy(str(proxies)) is not None
-
     class Obj:
         def as_dict(self):
             return {"x": 1}
@@ -212,6 +203,52 @@ def test_pipeline_helpers_cover_edge_cases(tmp_path: Path):
 
     out = asyncio.run(_collect())
     assert out == [{"a": 1}]
+
+
+def test_discover_keyword_with_api_prefers_search_type():
+    class Search:
+        async def search_type(self, term, entity, count=10):
+            assert term == "fitness"
+            assert entity == "item"
+            assert count == 2
+            for row in [{"id": "1"}, {"id": "2"}]:
+                yield row
+
+    class Api:
+        search = Search()
+
+    rows = asyncio.run(pipeline._discover_keyword_with_api(Api(), keyword="fitness", limit=2))
+    assert rows == [{"id": "1"}, {"id": "2"}]
+
+
+def test_discover_keyword_with_api_falls_back_to_videos():
+    class Search:
+        def videos(self, query=None, count=10, **kwargs):
+            assert query == "fitness" or kwargs.get("keyword") == "fitness" or kwargs.get("keywords") == "fitness"
+            assert count == 2
+
+            async def gen():
+                yield {"id": "10"}
+                yield {"id": "11"}
+
+            return gen()
+
+    class Api:
+        search = Search()
+
+    rows = asyncio.run(pipeline._discover_keyword_with_api(Api(), keyword="fitness", limit=2))
+    assert rows == [{"id": "10"}, {"id": "11"}]
+
+
+def test_discover_keyword_with_api_requires_supported_search_api():
+    class Search:
+        pass
+
+    class Api:
+        search = Search()
+
+    with pytest.raises(RuntimeError, match="search\\.videos and search\\.search_type are not available"):
+        asyncio.run(pipeline._discover_keyword_with_api(Api(), keyword="fitness", limit=2))
 
 
 def test_tiktok_post_scraper_url_file_helpers(tmp_path: Path, monkeypatch):
