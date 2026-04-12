@@ -400,18 +400,12 @@ def _jaccard(a: Sequence[str], b: Sequence[str]) -> float:
     return 0.0 if union == 0 else inter / union
 
 
-def _batch_jaccard_matrix(token_lists: List[List[str]]) -> np.ndarray:
-    """Compute pairwise Jaccard similarity matrix using vectorized ops.
+def _build_sparse_binary(token_lists: List[List[str]]) -> Any:
+    """Build a sparse binary token matrix from token lists.
 
-    Uses scipy sparse matrices to keep memory low, then GPU (torch) for the
-    matrix multiply when available, falling back to scipy sparse on CPU.
-    Returns an (N, N) float32 similarity matrix.
+    Returns a scipy CSR matrix of shape (N, vocab_size).
     """
     from scipy import sparse as sp
-
-    n = len(token_lists)
-    if n == 0:
-        return np.empty((0, 0), dtype=np.float32)
 
     vocab: Dict[str, int] = {}
     for tokens in token_lists:
@@ -420,35 +414,35 @@ def _batch_jaccard_matrix(token_lists: List[List[str]]) -> np.ndarray:
                 vocab[t] = len(vocab)
 
     v = len(vocab)
-    # Build sparse binary matrix — much less memory than dense.
     rows_idx, cols_idx = [], []
     for i, tokens in enumerate(token_lists):
         for t in tokens:
             rows_idx.append(i)
             cols_idx.append(vocab[t])
     data = np.ones(len(rows_idx), dtype=np.float32)
-    binary = sp.csr_matrix((data, (rows_idx, cols_idx)), shape=(n, v))
+    return sp.csr_matrix((data, (rows_idx, cols_idx)), shape=(len(token_lists), v))
 
-    try:
-        import torch
-        if torch.cuda.is_available():
-            dev = torch.device("cuda")
-            b = torch.tensor(binary.toarray(), dtype=torch.float32, device=dev)
-            intersection = b @ b.T
-            row_sums = b.sum(dim=1, keepdim=True)
-            union = row_sums + row_sums.T - intersection
-            sim = torch.where(union > 0, intersection / union, torch.zeros_like(union))
-            return sim.cpu().numpy()
-    except (ImportError, RuntimeError):
-        pass
 
-    # Sparse matmul — only materializes the NxN result, not the NxV dense matrix.
-    intersection = (binary @ binary.T).toarray().astype(np.float32)
-    row_sums = np.asarray(binary.sum(axis=1), dtype=np.float32).ravel()
-    union = row_sums[:, None] + row_sums[None, :] - intersection
+def _jaccard_top_k_for_row(
+    qi: int,
+    binary_row: Any,
+    binary_all: Any,
+    row_sums: np.ndarray,
+    mask: np.ndarray,
+    k: int,
+) -> List[Tuple[int, float]]:
+    """Compute Jaccard similarities for one query row and return top-k masked."""
+    inter = np.asarray((binary_row @ binary_all.T).todense(), dtype=np.float32).ravel()
+    union = row_sums[qi] + row_sums - inter
     with np.errstate(divide="ignore", invalid="ignore"):
-        sim = np.where(union > 0, intersection / union, 0.0)
-    return sim.astype(np.float32)
+        sims = np.where((union > 0) & mask, inter / union, -1.0)
+    if k >= int(mask.sum()):
+        top_idx = np.where(sims >= 0)[0]
+    else:
+        top_idx = np.argpartition(sims, -k)[-k:]
+        top_idx = top_idx[sims[top_idx] >= 0]
+    top_idx = top_idx[np.argsort(sims[top_idx])[::-1]]
+    return [(int(ci), float(sims[ci])) for ci in top_idx]
 
 
 def _infer_topic(video: CanonicalVideo) -> str:
@@ -1043,15 +1037,17 @@ def _build_pair_rows(
     objective: str,
     target_source: str,
     max_candidates: int,
-    sim_matrix: Optional[np.ndarray] = None,
+    sparse_binary: Optional[Any] = None,
+    row_sums: Optional[np.ndarray] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
     pair_rows: List[Dict[str, Any]] = []
     dropped_by_reason: Dict[str, int] = {}
 
-    # Compute similarity matrix if not provided (allows reuse across objectives).
-    if sim_matrix is None:
+    # Build sparse binary if not provided.
+    if sparse_binary is None:
         token_lists = _build_token_lists(rows)
-        sim_matrix = _batch_jaccard_matrix(token_lists)
+        sparse_binary = _build_sparse_binary(token_lists)
+        row_sums = np.asarray(sparse_binary.sum(axis=1), dtype=np.float32).ravel()
 
     # Build as_of array for temporal mask.
     as_of_times = [row["as_of_time"] for row in rows]
@@ -1070,8 +1066,7 @@ def _build_pair_rows(
                 )
                 continue
 
-        # Use precomputed similarity row — mask out self and future candidates.
-        sims = sim_matrix[qi]
+        # Compute Jaccard for this row only — never materializes full NxN matrix.
         mask = np.array(
             [
                 (i != qi and as_of_times[i] < query_as_of)
@@ -1079,14 +1074,12 @@ def _build_pair_rows(
             ],
             dtype=bool,
         )
-        masked_sims = np.where(mask, sims, -1.0)
-        top_indices = np.argpartition(masked_sims, -min(max_candidates, int(mask.sum())))[-max_candidates:] if mask.any() else np.array([], dtype=int)
-        top_indices = top_indices[masked_sims[top_indices] >= 0]
-        top_indices = top_indices[np.argsort(masked_sims[top_indices])[::-1]]
+        top_pairs = _jaccard_top_k_for_row(
+            qi, sparse_binary[qi], sparse_binary, row_sums, mask, max_candidates,
+        )
 
-        for ci in top_indices:
+        for ci, similarity in top_pairs:
             candidate = rows[ci]
-            similarity = float(sims[ci])
             score = _objective_score(candidate, objective, target_source=target_source)
             if score is None:
                 dropped_by_reason["candidate_target_unavailable"] = (
@@ -1855,9 +1848,10 @@ def build_training_data_mart(
     pair_drop_stats: Dict[str, int] = {}
     if cfg.include_pair_rows:
         pair_rows = []
-        # Compute Jaccard similarity matrix once (GPU-accelerated) and reuse for all objectives.
+        # Build sparse binary matrix for per-row Jaccard (memory-efficient).
         _token_lists = _build_token_lists(rows)
-        _sim_matrix = _batch_jaccard_matrix(_token_lists)
+        _sparse_binary = _build_sparse_binary(_token_lists)
+        _row_sums = np.asarray(_sparse_binary.sum(axis=1), dtype=np.float32).ravel()
         del _token_lists
         for _pair_obj in sorted(VALID_PAIR_OBJECTIVES):
             _obj_pairs, _obj_drops = _build_pair_rows(
@@ -1865,14 +1859,15 @@ def build_training_data_mart(
                 objective=_pair_obj,
                 target_source=cfg.pair_target_source,
                 max_candidates=cfg.pair_candidates_per_query,
-                sim_matrix=_sim_matrix,
+                sparse_binary=_sparse_binary,
+                row_sums=_row_sums,
             )
             pair_rows.extend(_obj_pairs)
             for _k, _v in _obj_drops.items():
                 pair_drop_stats[f"{_pair_obj}_{_k}"] = (
                     pair_drop_stats.get(f"{_pair_obj}_{_k}", 0) + _v
                 )
-        del _sim_matrix
+        del _sparse_binary, _row_sums
     else:
         pair_rows = []
 
