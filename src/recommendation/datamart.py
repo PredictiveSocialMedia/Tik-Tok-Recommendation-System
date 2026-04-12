@@ -403,9 +403,12 @@ def _jaccard(a: Sequence[str], b: Sequence[str]) -> float:
 def _batch_jaccard_matrix(token_lists: List[List[str]]) -> np.ndarray:
     """Compute pairwise Jaccard similarity matrix using vectorized ops.
 
-    Uses GPU (torch) when available, falls back to NumPy on CPU.
+    Uses scipy sparse matrices to keep memory low, then GPU (torch) for the
+    matrix multiply when available, falling back to scipy sparse on CPU.
     Returns an (N, N) float32 similarity matrix.
     """
+    from scipy import sparse as sp
+
     n = len(token_lists)
     if n == 0:
         return np.empty((0, 0), dtype=np.float32)
@@ -417,27 +420,32 @@ def _batch_jaccard_matrix(token_lists: List[List[str]]) -> np.ndarray:
                 vocab[t] = len(vocab)
 
     v = len(vocab)
-    binary = np.zeros((n, v), dtype=np.float32)
+    # Build sparse binary matrix — much less memory than dense.
+    rows_idx, cols_idx = [], []
     for i, tokens in enumerate(token_lists):
         for t in tokens:
-            binary[i, vocab[t]] = 1.0
+            rows_idx.append(i)
+            cols_idx.append(vocab[t])
+    data = np.ones(len(rows_idx), dtype=np.float32)
+    binary = sp.csr_matrix((data, (rows_idx, cols_idx)), shape=(n, v))
 
     try:
         import torch
         if torch.cuda.is_available():
             dev = torch.device("cuda")
-            b = torch.tensor(binary, device=dev)
+            b = torch.tensor(binary.toarray(), dtype=torch.float32, device=dev)
             intersection = b @ b.T
             row_sums = b.sum(dim=1, keepdim=True)
             union = row_sums + row_sums.T - intersection
             sim = torch.where(union > 0, intersection / union, torch.zeros_like(union))
             return sim.cpu().numpy()
-    except ImportError:
+    except (ImportError, RuntimeError):
         pass
 
-    intersection = binary @ binary.T
-    row_sums = binary.sum(axis=1, keepdims=True)
-    union = row_sums + row_sums.T - intersection
+    # Sparse matmul — only materializes the NxN result, not the NxV dense matrix.
+    intersection = (binary @ binary.T).toarray().astype(np.float32)
+    row_sums = np.asarray(binary.sum(axis=1), dtype=np.float32).ravel()
+    union = row_sums[:, None] + row_sums[None, :] - intersection
     with np.errstate(divide="ignore", invalid="ignore"):
         sim = np.where(union > 0, intersection / union, 0.0)
     return sim.astype(np.float32)
