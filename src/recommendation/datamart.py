@@ -3,10 +3,13 @@ from __future__ import annotations
 import math
 import hashlib
 import json
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Literal, Optional, Sequence, Tuple
+
+import numpy as np
 
 from pydantic import BaseModel, Field
 
@@ -395,6 +398,49 @@ def _jaccard(a: Sequence[str], b: Sequence[str]) -> float:
     inter = len(set_a.intersection(set_b))
     union = len(set_a.union(set_b))
     return 0.0 if union == 0 else inter / union
+
+
+def _batch_jaccard_matrix(token_lists: List[List[str]]) -> np.ndarray:
+    """Compute pairwise Jaccard similarity matrix using vectorized ops.
+
+    Uses GPU (torch) when available, falls back to NumPy on CPU.
+    Returns an (N, N) float32 similarity matrix.
+    """
+    n = len(token_lists)
+    if n == 0:
+        return np.empty((0, 0), dtype=np.float32)
+
+    vocab: Dict[str, int] = {}
+    for tokens in token_lists:
+        for t in tokens:
+            if t not in vocab:
+                vocab[t] = len(vocab)
+
+    v = len(vocab)
+    binary = np.zeros((n, v), dtype=np.float32)
+    for i, tokens in enumerate(token_lists):
+        for t in tokens:
+            binary[i, vocab[t]] = 1.0
+
+    try:
+        import torch
+        if torch.cuda.is_available():
+            dev = torch.device("cuda")
+            b = torch.tensor(binary, device=dev)
+            intersection = b @ b.T
+            row_sums = b.sum(dim=1, keepdim=True)
+            union = row_sums + row_sums.T - intersection
+            sim = torch.where(union > 0, intersection / union, torch.zeros_like(union))
+            return sim.cpu().numpy()
+    except ImportError:
+        pass
+
+    intersection = binary @ binary.T
+    row_sums = binary.sum(axis=1, keepdims=True)
+    union = row_sums + row_sums.T - intersection
+    with np.errstate(divide="ignore", invalid="ignore"):
+        sim = np.where(union > 0, intersection / union, 0.0)
+    return sim.astype(np.float32)
 
 
 def _infer_topic(video: CanonicalVideo) -> str:
@@ -960,32 +1006,50 @@ def _relevance_label(score: float) -> int:
     return 0
 
 
+def _build_token_lists(rows: Sequence[Dict[str, Any]]) -> List[List[str]]:
+    """Extract deduplicated token lists for each row (for Jaccard similarity)."""
+    token_lists: List[List[str]] = []
+    for row in rows:
+        token_lists.append(
+            _dedupe(
+                [
+                    *_tokenize(str(row.get("caption") or "")),
+                    *[
+                        tag.replace("#", "").strip().lower()
+                        for tag in list(row.get("hashtags") or [])
+                        if str(tag).strip()
+                    ],
+                    *_tokenize(
+                        " ".join(str(item) for item in list(row.get("keywords") or []))
+                    ),
+                    *_tokenize(str(row.get("search_query") or "")),
+                    *_tokenize(row["topic_key"]),
+                ]
+            )
+        )
+    return token_lists
+
+
 def _build_pair_rows(
     rows: Sequence[Dict[str, Any]],
     objective: str,
     target_source: str,
     max_candidates: int,
+    sim_matrix: Optional[np.ndarray] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
     pair_rows: List[Dict[str, Any]] = []
     dropped_by_reason: Dict[str, int] = {}
-    row_tokens: Dict[str, List[str]] = {}
-    for row in rows:
-        row_tokens[row["row_id"]] = _dedupe(
-            [
-                *_tokenize(str(row.get("caption") or "")),
-                *[
-                    tag.replace("#", "").strip().lower()
-                    for tag in list(row.get("hashtags") or [])
-                    if str(tag).strip()
-                ],
-                *_tokenize(" ".join(str(item) for item in list(row.get("keywords") or []))),
-                *_tokenize(str(row.get("search_query") or "")),
-                *_tokenize(row["topic_key"]),
-            ]
-        )
 
-    for query in rows:
-        query_as_of = query["as_of_time"]
+    # Compute similarity matrix if not provided (allows reuse across objectives).
+    if sim_matrix is None:
+        token_lists = _build_token_lists(rows)
+        sim_matrix = _batch_jaccard_matrix(token_lists)
+
+    # Build as_of array for temporal mask.
+    as_of_times = [row["as_of_time"] for row in rows]
+
+    for qi, query in enumerate(rows):
+        query_as_of = as_of_times[qi]
         if target_source == "trajectory_v2_composite":
             query_available = (
                 query.get("target_availability", {})
@@ -997,18 +1061,24 @@ def _build_pair_rows(
                     dropped_by_reason.get("query_target_unavailable", 0) + 1
                 )
                 continue
-        query_tokens = row_tokens.get(query["row_id"], [])
-        candidates: List[Tuple[float, Dict[str, Any]]] = []
-        for candidate in rows:
-            if candidate["row_id"] == query["row_id"]:
-                continue
-            if candidate["as_of_time"] >= query_as_of:
-                continue
-            similarity = _jaccard(query_tokens, row_tokens.get(candidate["row_id"], []))
-            candidates.append((similarity, candidate))
 
-        candidates.sort(key=lambda item: item[0], reverse=True)
-        for similarity, candidate in candidates[:max_candidates]:
+        # Use precomputed similarity row — mask out self and future candidates.
+        sims = sim_matrix[qi]
+        mask = np.array(
+            [
+                (i != qi and as_of_times[i] < query_as_of)
+                for i in range(len(rows))
+            ],
+            dtype=bool,
+        )
+        masked_sims = np.where(mask, sims, -1.0)
+        top_indices = np.argpartition(masked_sims, -min(max_candidates, int(mask.sum())))[-max_candidates:] if mask.any() else np.array([], dtype=int)
+        top_indices = top_indices[masked_sims[top_indices] >= 0]
+        top_indices = top_indices[np.argsort(masked_sims[top_indices])[::-1]]
+
+        for ci in top_indices:
+            candidate = rows[ci]
+            similarity = float(sims[ci])
             score = _objective_score(candidate, objective, target_source=target_source)
             if score is None:
                 dropped_by_reason["candidate_target_unavailable"] = (
@@ -1777,18 +1847,24 @@ def build_training_data_mart(
     pair_drop_stats: Dict[str, int] = {}
     if cfg.include_pair_rows:
         pair_rows = []
+        # Compute Jaccard similarity matrix once (GPU-accelerated) and reuse for all objectives.
+        _token_lists = _build_token_lists(rows)
+        _sim_matrix = _batch_jaccard_matrix(_token_lists)
+        del _token_lists
         for _pair_obj in sorted(VALID_PAIR_OBJECTIVES):
             _obj_pairs, _obj_drops = _build_pair_rows(
                 rows,
                 objective=_pair_obj,
                 target_source=cfg.pair_target_source,
                 max_candidates=cfg.pair_candidates_per_query,
+                sim_matrix=_sim_matrix,
             )
             pair_rows.extend(_obj_pairs)
             for _k, _v in _obj_drops.items():
                 pair_drop_stats[f"{_pair_obj}_{_k}"] = (
                     pair_drop_stats.get(f"{_pair_obj}_{_k}", 0) + _v
                 )
+        del _sim_matrix
     else:
         pair_rows = []
 
