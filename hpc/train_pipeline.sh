@@ -15,22 +15,24 @@ echo "Hostname:   $(hostname)"
 echo "Date:       $(date)"
 echo "User:       $(whoami)"
 echo "CPUs:       $SLURM_CPUS_PER_TASK"
-echo "GPU:        $CUDA_VISIBLE_DEVICES"
+echo "GPU:        ${CUDA_VISIBLE_DEVICES:-none}"
 echo "Working dir: $(pwd)"
 echo ""
 
-# Show GPU info
-nvidia-smi
+# Show GPU info (non-fatal if running on CPU partition)
+nvidia-smi || echo "No GPU available — running in CPU mode"
 
 # Activate conda environment
 source "$HOME/miniforge3/bin/activate" tiktok-rec
 
-# Verify GPU is visible to PyTorch
+# Verify GPU is visible to PyTorch (informational only)
 python3 -c "
 import torch
 print(f'PyTorch CUDA available: {torch.cuda.is_available()}')
 if torch.cuda.is_available():
     print(f'GPU: {torch.cuda.get_device_name(0)}')
+else:
+    print('Running CPU-only — NumPy vectorization still active')
 "
 
 # Set environment
