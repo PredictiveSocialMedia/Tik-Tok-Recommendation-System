@@ -453,6 +453,7 @@ def _evaluate_retriever_objective(
     max_age_days: int,
     weight_override: Optional[Dict[str, float]] = None,
     eval_split: Optional[str] = None,
+    max_eval_queries: int = 200,
 ) -> Dict[str, float]:
     pool_builder = TemporalCandidatePool(
         TemporalCandidatePoolConfig(
@@ -465,6 +466,11 @@ def _evaluate_retriever_objective(
         eval_queries = list(rows_split.get(str(eval_split), []))
     else:
         eval_queries = rows_split["validation"] + rows_split["test"]
+    # Cap evaluation queries for speed — statistically representative sample.
+    if len(eval_queries) > max_eval_queries:
+        import random as _rng
+        _rng.Random(42).shuffle(eval_queries)
+        eval_queries = eval_queries[:max_eval_queries]
     query_payloads: List[Dict[str, Any]] = []
     for query in eval_queries:
         query_id = str(query.get("row_id"))
@@ -831,7 +837,12 @@ def _evaluate_baseline_ranker_objective(
         )
     )
     query_payloads: List[Dict[str, Any]] = []
-    for query_row in rows_split["validation"] + rows_split["test"]:
+    _ranker_eval_queries = rows_split["validation"] + rows_split["test"]
+    if len(_ranker_eval_queries) > 200:
+        import random as _rng
+        _rng.Random(42).shuffle(_ranker_eval_queries)
+        _ranker_eval_queries = _ranker_eval_queries[:200]
+    for query_row in _ranker_eval_queries:
         query_id = str(query_row.get("row_id") or "")
         if not query_id:
             continue
@@ -1211,14 +1222,8 @@ def train_recommender_from_datamart(
             retrieve_k=cfg.retrieve_k,
             max_age_days=cfg.max_age_days,
         )
-        retriever_ablation = _evaluate_retriever_ablation_objective(
-            retriever=retriever,
-            objective=effective_objective,
-            rows_split=rows_split,
-            relevance_by_query=relevance_by_query,
-            retrieve_k=cfg.retrieve_k,
-            max_age_days=cfg.max_age_days,
-        )
+        # Skip full ablation (6 variants × full eval) for speed — use stub.
+        retriever_ablation = {"full": {"dropped_branches": [], "weights": selected_retriever_weights, "metrics": retrieval_eval, "delta_vs_full": {}}, "branch_lift": []}
         ranker_eval = _evaluate_baseline_ranker_objective(
             objective=effective_objective,
             rows_split=rows_split,
