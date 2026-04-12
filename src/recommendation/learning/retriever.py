@@ -35,6 +35,28 @@ except Exception:  # pragma: no cover - optional dependency
 
 logger = logging.getLogger(__name__)
 
+
+def _sbert_device() -> str:
+    """Pick best available device for sentence-transformers."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda"
+    except ImportError:
+        pass
+    return "cpu"
+
+
+def _to_gpu_index(index):
+    """Move a FAISS index to GPU if available (requires faiss-gpu)."""
+    if faiss is None:
+        return index
+    try:
+        res = faiss.StandardGpuResources()
+        return faiss.index_cpu_to_gpu(res, 0, index)
+    except (AttributeError, RuntimeError):
+        return index
+
 RUNTIME_OBJECTIVES = ("reach", "engagement", "conversion")
 CREATOR_RETRIEVAL_VERSION = "creator_retrieval.v1"
 CREATOR_RETRIEVAL_MAX_BLEND_WEIGHT = 0.16
@@ -589,11 +611,14 @@ class HybridRetriever:
         _sbert_encoder = None  # stored for reuse in multimodal branch
         if SentenceTransformer is not None:
             try:
-                _sbert_encoder = SentenceTransformer(cfg.dense_model_name)
+                _device = _sbert_device()
+                _sbert_encoder = SentenceTransformer(cfg.dense_model_name, device=_device)
+                logger.info("SentenceTransformer device: %s", _device)
                 embeddings = _sbert_encoder.encode(
                     row_texts,
                     convert_to_numpy=True,
                     normalize_embeddings=True,
+                    batch_size=256,
                 ).astype(np.float32)
                 dense_backend = (
                     "sentence-transformers-faiss"
@@ -640,6 +665,7 @@ class HybridRetriever:
                 caption_texts,
                 convert_to_numpy=True,
                 normalize_embeddings=True,
+                batch_size=256,
             ).astype(np.float32)
             multimodal_matrix = mm_embeddings
             multimodal_backend = (
@@ -1062,7 +1088,7 @@ class HybridRetriever:
             model_name = self.dense_payload["model_name"]
             try:
                 if self._dense_encoder is None:
-                    self._dense_encoder = SentenceTransformer(model_name)
+                    self._dense_encoder = SentenceTransformer(model_name, device=_sbert_device())
                 query_embedding = self._dense_encoder.encode(
                     [query_text],
                     convert_to_numpy=True,
@@ -1073,8 +1099,9 @@ class HybridRetriever:
             embeddings = self.dense_payload["embeddings"]
             if faiss is not None and self.dense_backend.endswith("faiss"):
                 if self._dense_faiss is None:
-                    self._dense_faiss = faiss.IndexFlatIP(int(embeddings.shape[1]))
-                    self._dense_faiss.add(np.asarray(embeddings, dtype=np.float32))
+                    idx = faiss.IndexFlatIP(int(embeddings.shape[1]))
+                    idx.add(np.asarray(embeddings, dtype=np.float32))
+                    self._dense_faiss = _to_gpu_index(idx)
                 scores, indices = self._dense_faiss.search(
                     np.expand_dims(query_embedding, axis=0), len(self.row_ids)
                 )
@@ -1101,8 +1128,9 @@ class HybridRetriever:
         query_vec = _query_multimodal_fallback(query_row, max(1, dim))
         if faiss is not None and self.multimodal_backend.endswith("faiss"):
             if self._multimodal_faiss is None:
-                self._multimodal_faiss = faiss.IndexFlatIP(int(embeddings.shape[1]))
-                self._multimodal_faiss.add(np.asarray(embeddings, dtype=np.float32))
+                idx = faiss.IndexFlatIP(int(embeddings.shape[1]))
+                idx.add(np.asarray(embeddings, dtype=np.float32))
+                self._multimodal_faiss = _to_gpu_index(idx)
             scores, indices = self._multimodal_faiss.search(
                 np.expand_dims(query_vec, axis=0),
                 len(self.row_ids),
@@ -1130,8 +1158,9 @@ class HybridRetriever:
         query_vec, trace = _query_graph_vector(query_row, self.graph_payload, max(1, dim))
         if faiss is not None and self.graph_backend.endswith("faiss"):
             if self._graph_faiss is None:
-                self._graph_faiss = faiss.IndexFlatIP(int(embeddings.shape[1]))
-                self._graph_faiss.add(np.asarray(embeddings, dtype=np.float32))
+                idx = faiss.IndexFlatIP(int(embeddings.shape[1]))
+                idx.add(np.asarray(embeddings, dtype=np.float32))
+                self._graph_faiss = _to_gpu_index(idx)
             scores, indices = self._graph_faiss.search(
                 np.expand_dims(query_vec, axis=0),
                 len(self.row_ids),
@@ -1163,8 +1192,9 @@ class HybridRetriever:
         )
         if faiss is not None and self.trajectory_backend.endswith("faiss"):
             if self._trajectory_faiss is None:
-                self._trajectory_faiss = faiss.IndexFlatIP(int(embeddings.shape[1]))
-                self._trajectory_faiss.add(np.asarray(embeddings, dtype=np.float32))
+                idx = faiss.IndexFlatIP(int(embeddings.shape[1]))
+                idx.add(np.asarray(embeddings, dtype=np.float32))
+                self._trajectory_faiss = _to_gpu_index(idx)
             scores, indices = self._trajectory_faiss.search(
                 np.expand_dims(query_vec, axis=0),
                 len(self.row_ids),
