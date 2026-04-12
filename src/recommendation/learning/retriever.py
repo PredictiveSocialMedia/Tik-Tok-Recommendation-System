@@ -63,6 +63,26 @@ def _to_gpu_index(index, max_k: int = 0):
     except (AttributeError, RuntimeError):
         return index
 
+
+def _gpu_dot_scores(embeddings: np.ndarray, query_vec: np.ndarray) -> Optional[np.ndarray]:
+    """Compute inner-product scores on GPU via torch.matmul.
+
+    Bypasses FAISS entirely — no k-selection limit. Returns None if GPU
+    unavailable, so callers can fall back to FAISS/NumPy.
+    """
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return None
+        dev = torch.device("cuda")
+        emb = torch.tensor(embeddings, dtype=torch.float32, device=dev)
+        q = torch.tensor(query_vec, dtype=torch.float32, device=dev)
+        scores = (emb @ q).cpu().numpy()
+        del emb, q
+        return scores
+    except (ImportError, RuntimeError):
+        return None
+
 RUNTIME_OBJECTIVES = ("reach", "engagement", "conversion")
 CREATOR_RETRIEVAL_VERSION = "creator_retrieval.v1"
 CREATOR_RETRIEVAL_MAX_BLEND_WEIGHT = 0.16
@@ -1103,6 +1123,9 @@ class HybridRetriever:
             except Exception:  # pragma: no cover
                 return np.zeros(len(self.row_ids), dtype=np.float32)
             embeddings = self.dense_payload["embeddings"]
+            gpu_scores = _gpu_dot_scores(np.asarray(embeddings, dtype=np.float32), query_embedding)
+            if gpu_scores is not None:
+                return gpu_scores.astype(np.float32)
             if faiss is not None and self.dense_backend.endswith("faiss"):
                 if self._dense_faiss is None:
                     idx = faiss.IndexFlatIP(int(embeddings.shape[1]))
@@ -1132,6 +1155,9 @@ class HybridRetriever:
             return np.zeros(len(self.row_ids), dtype=np.float32)
         dim = int(self.multimodal_payload.get("dimension", embeddings.shape[1] if embeddings.ndim == 2 else 4))
         query_vec = _query_multimodal_fallback(query_row, max(1, dim))
+        gpu_scores = _gpu_dot_scores(embeddings, query_vec)
+        if gpu_scores is not None:
+            return gpu_scores.astype(np.float32)
         if faiss is not None and self.multimodal_backend.endswith("faiss"):
             if self._multimodal_faiss is None:
                 idx = faiss.IndexFlatIP(int(embeddings.shape[1]))
@@ -1162,6 +1188,9 @@ class HybridRetriever:
             )
         )
         query_vec, trace = _query_graph_vector(query_row, self.graph_payload, max(1, dim))
+        gpu_scores = _gpu_dot_scores(embeddings, query_vec)
+        if gpu_scores is not None:
+            return gpu_scores.astype(np.float32), trace
         if faiss is not None and self.graph_backend.endswith("faiss"):
             if self._graph_faiss is None:
                 idx = faiss.IndexFlatIP(int(embeddings.shape[1]))
@@ -1196,6 +1225,14 @@ class HybridRetriever:
             max(1, dim),
             payload=self.trajectory_payload,
         )
+        traj_trace = {
+            "source": "trajectory_features",
+            "trajectory_manifest_id": self.trajectory_manifest_id,
+            "trajectory_version": self.trajectory_version,
+        }
+        gpu_scores = _gpu_dot_scores(embeddings, query_vec)
+        if gpu_scores is not None:
+            return gpu_scores.astype(np.float32), traj_trace
         if faiss is not None and self.trajectory_backend.endswith("faiss"):
             if self._trajectory_faiss is None:
                 idx = faiss.IndexFlatIP(int(embeddings.shape[1]))
@@ -1209,11 +1246,7 @@ class HybridRetriever:
             for idx, score in zip(indices[0], scores[0]):
                 if idx >= 0:
                     out[int(idx)] = float(score)
-            return out, {
-                "source": "trajectory_features",
-                "trajectory_manifest_id": self.trajectory_manifest_id,
-                "trajectory_version": self.trajectory_version,
-            }
+            return out, traj_trace
         return np.dot(embeddings, query_vec).astype(np.float32), {
             "source": "trajectory_features",
             "trajectory_manifest_id": self.trajectory_manifest_id,
