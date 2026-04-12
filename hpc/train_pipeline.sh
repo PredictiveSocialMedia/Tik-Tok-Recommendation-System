@@ -37,6 +37,7 @@ else:
 
 # Set environment
 export PYTHONPATH=.
+export PYTHONUNBUFFERED=1
 # DATABASE_URL must be set before submitting: export DATABASE_URL="postgresql://..."
 if [ -z "${DATABASE_URL:-}" ]; then
     echo "ERROR: DATABASE_URL not set. Export it before running sbatch."

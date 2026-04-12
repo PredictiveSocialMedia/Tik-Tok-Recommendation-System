@@ -675,6 +675,55 @@ def _learn_objective_blend_weights(
     logger.warning(msg)
     print(msg, file=sys.stderr, flush=True)
 
+    # Pre-compute branch scores for each eval query ONCE, then reuse across
+    # all weight combinations.  This is the key optimization: branch scoring
+    # (SBERT encode, FAISS/GPU dot products) is expensive but the results
+    # don't change when we vary the blend weights.
+    precompute_msg = (
+        f"[blend_search] objective={objective} pre-computing branch scores "
+        f"for {len(eval_slice)} eval queries..."
+    )
+    logger.warning(precompute_msg)
+    print(precompute_msg, file=sys.stderr, flush=True)
+
+    all_candidates = rows_split["train"] + rows_split["validation"]
+    cached_scores: List[Tuple[Dict[str, Any], Dict[str, Any], List[str]]] = []
+    for qi, query in enumerate(eval_slice):
+        query_id = str(query.get("row_id"))
+        rel = relevance_by_query.get(query_id, {})
+        relevant_ids = {
+            cid for cid, score in rel.items() if float(score) >= 2.0
+        }
+        if not relevant_ids:
+            continue
+        pool = pool_builder.for_query(
+            query_row=query,
+            candidate_rows=all_candidates,
+            index_cutoff_time=query.get("as_of_time"),
+        )
+        pool_ids = []
+        for row in pool:
+            if not isinstance(row, dict):
+                continue
+            for key in ("candidate_id", "video_id", "row_id"):
+                value = row.get(key)
+                if isinstance(value, str) and value.strip():
+                    pool_ids.append(value.strip())
+                    break
+        branch_scores = retriever.compute_branch_scores(query)
+        cached_scores.append((
+            {"relevant_ids": relevant_ids, "pool_ids": pool_ids},
+            branch_scores,
+            pool_ids,
+        ))
+
+    precompute_done = (
+        f"[blend_search] objective={objective} pre-computed {len(cached_scores)} "
+        f"query score vectors. Starting weight grid ({len(candidates)} combos)..."
+    )
+    logger.warning(precompute_done)
+    print(precompute_done, file=sys.stderr, flush=True)
+
     best = retriever.branch_weights(objective)
     best_score = -1.0
     for cand_idx, weights in enumerate(candidates):
@@ -683,30 +732,15 @@ def _learn_objective_blend_weights(
             logger.warning(prog)
             print(prog, file=sys.stderr, flush=True)
         recalls: List[float] = []
-        for query in eval_slice:
-            query_id = str(query.get("row_id"))
-            rel = relevance_by_query.get(query_id, {})
-            relevant_ids = {
-                cid for cid, score in rel.items() if float(score) >= 2.0
-            }
-            if not relevant_ids:
-                continue
-            pool = pool_builder.for_query(
-                query_row=query,
-                candidate_rows=rows_split["train"] + rows_split["validation"],
-                index_cutoff_time=query.get("as_of_time"),
-            )
-            items = retriever.retrieve(
-                query_row=query,
-                candidate_rows=pool,
+        for meta, branch_scores, pool_ids in cached_scores:
+            items = retriever.fuse_and_rank(
+                branch_scores=branch_scores,
+                weights=weights,
+                candidate_ids=pool_ids,
                 top_k=retrieve_k,
-                index_cutoff_time=query.get("as_of_time"),
-                objective=objective,
-                retrieval_constraints={"max_age_days": max_age_days},
-                weight_override=weights,
             )
             ranked = [str(item.get("candidate_row_id")) for item in items]
-            recalls.append(recall_at_k(ranked, relevant_ids, min(100, retrieve_k)))
+            recalls.append(recall_at_k(ranked, meta["relevant_ids"], min(100, retrieve_k)))
         mean_score = sum(recalls) / len(recalls) if recalls else 0.0
         if mean_score > best_score:
             best_score = mean_score

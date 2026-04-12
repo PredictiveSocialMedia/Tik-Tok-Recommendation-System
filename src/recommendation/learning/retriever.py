@@ -64,21 +64,28 @@ def _to_gpu_index(index, max_k: int = 0):
         return index
 
 
+_gpu_embedding_cache: Dict[int, Any] = {}  # id(np_array) -> GPU tensor
+
+
 def _gpu_dot_scores(embeddings: np.ndarray, query_vec: np.ndarray) -> Optional[np.ndarray]:
     """Compute inner-product scores on GPU via torch.matmul.
 
-    Bypasses FAISS entirely — no k-selection limit. Returns None if GPU
-    unavailable, so callers can fall back to FAISS/NumPy.
+    Bypasses FAISS entirely — no k-selection limit. Caches the embedding
+    matrix on GPU across calls (keyed by numpy array id) so only the query
+    vector is uploaded each time.  Returns None if GPU unavailable.
     """
     try:
         import torch
         if not torch.cuda.is_available():
             return None
         dev = torch.device("cuda")
-        emb = torch.tensor(embeddings, dtype=torch.float32, device=dev)
-        q = torch.tensor(query_vec, dtype=torch.float32, device=dev)
+        arr_id = id(embeddings)
+        emb = _gpu_embedding_cache.get(arr_id)
+        if emb is None:
+            emb = torch.as_tensor(embeddings, dtype=torch.float32, device=dev)
+            _gpu_embedding_cache[arr_id] = emb
+        q = torch.as_tensor(query_vec, dtype=torch.float32, device=dev)
         scores = (emb @ q).cpu().numpy()
-        del emb, q
         return scores
     except (ImportError, RuntimeError):
         return None
@@ -517,6 +524,7 @@ class HybridRetriever:
         self._multimodal_faiss: Any = None
         self._graph_faiss: Any = None
         self._trajectory_faiss: Any = None
+        self._row_id_to_idx: Dict[str, int] = {rid: i for i, rid in enumerate(row_ids)}
         self.graph_bundle_id = str(self.graph_payload.get("graph_bundle_id") or "")
         self.graph_version = str(self.graph_payload.get("graph_version") or "")
         self.trajectory_manifest_id = str(
@@ -1299,6 +1307,60 @@ class HybridRetriever:
             if len(filtered) >= min_required or tier == 3:
                 return filtered, tier
         return temporal_candidates, 3
+
+    def compute_branch_scores(
+        self, query_row: Dict[str, Any]
+    ) -> Dict[str, np.ndarray]:
+        """Pre-compute and normalize all 5 branch score arrays for a query.
+
+        Returns a dict with keys: lexical, dense_text, multimodal, graph_dense,
+        trajectory_dense.  Each value is a float32 array of len(row_ids).
+        Use with fuse_and_rank() to avoid recomputing scores across weight combos.
+        """
+        query_text = row_text(query_row)
+        query_lexical_text = row_lexical_text(query_row)
+        if not query_text.strip():
+            query_text = str(query_row.get("topic_key") or "general")
+        if not query_lexical_text.strip():
+            query_lexical_text = query_text.lower()
+
+        graph_raw, _ = self._graph_scores(query_row)
+        traj_raw, _ = self._trajectory_scores(query_row)
+        return {
+            "lexical": _normalize_scores(self._sparse_scores(query_lexical_text)),
+            "dense_text": _normalize_scores(self._dense_scores(query_text)),
+            "multimodal": _normalize_scores(self._multimodal_scores(query_row)),
+            "graph_dense": _normalize_scores(graph_raw),
+            "trajectory_dense": _normalize_scores(traj_raw),
+        }
+
+    def fuse_and_rank(
+        self,
+        branch_scores: Dict[str, np.ndarray],
+        weights: Dict[str, float],
+        candidate_ids: Sequence[str],
+        top_k: int = 200,
+    ) -> List[Dict[str, Any]]:
+        """Fuse pre-computed branch scores with given weights and rank.
+
+        Lightweight: only does weighted sum + argsort.  No SBERT/FAISS calls.
+        """
+        fused = np.zeros(len(self.row_ids), dtype=np.float32)
+        for branch, w in weights.items():
+            if w > 0 and branch in branch_scores:
+                fused += w * branch_scores[branch]
+
+        id_set = set(candidate_ids)
+        id_to_idx = self._row_id_to_idx
+        valid = [(idx, fused[idx]) for cid in id_set if (idx := id_to_idx.get(cid)) is not None]
+        valid.sort(key=lambda x: x[1], reverse=True)
+        results = []
+        for idx, score in valid[:top_k]:
+            results.append({
+                "candidate_row_id": self.row_ids[idx],
+                "fused_score": float(score),
+            })
+        return results
 
     def retrieve(
         self,
