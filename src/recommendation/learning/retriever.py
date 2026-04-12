@@ -47,9 +47,15 @@ def _sbert_device() -> str:
     return "cpu"
 
 
-def _to_gpu_index(index):
-    """Move a FAISS index to GPU if available (requires faiss-gpu)."""
+def _to_gpu_index(index, max_k: int = 0):
+    """Move a FAISS index to GPU if available (requires faiss-gpu).
+
+    GPU FAISS limits k-selection to 2048. If the index will be searched with
+    k > 2048 (pass max_k to signal this), the index stays on CPU.
+    """
     if faiss is None:
+        return index
+    if max_k > 2048:
         return index
     try:
         res = faiss.StandardGpuResources()
@@ -1101,7 +1107,7 @@ class HybridRetriever:
                 if self._dense_faiss is None:
                     idx = faiss.IndexFlatIP(int(embeddings.shape[1]))
                     idx.add(np.asarray(embeddings, dtype=np.float32))
-                    self._dense_faiss = _to_gpu_index(idx)
+                    self._dense_faiss = _to_gpu_index(idx, max_k=len(self.row_ids))
                 scores, indices = self._dense_faiss.search(
                     np.expand_dims(query_embedding, axis=0), len(self.row_ids)
                 )
@@ -1130,7 +1136,7 @@ class HybridRetriever:
             if self._multimodal_faiss is None:
                 idx = faiss.IndexFlatIP(int(embeddings.shape[1]))
                 idx.add(np.asarray(embeddings, dtype=np.float32))
-                self._multimodal_faiss = _to_gpu_index(idx)
+                self._multimodal_faiss = _to_gpu_index(idx, max_k=len(self.row_ids))
             scores, indices = self._multimodal_faiss.search(
                 np.expand_dims(query_vec, axis=0),
                 len(self.row_ids),
@@ -1160,7 +1166,7 @@ class HybridRetriever:
             if self._graph_faiss is None:
                 idx = faiss.IndexFlatIP(int(embeddings.shape[1]))
                 idx.add(np.asarray(embeddings, dtype=np.float32))
-                self._graph_faiss = _to_gpu_index(idx)
+                self._graph_faiss = _to_gpu_index(idx, max_k=len(self.row_ids))
             scores, indices = self._graph_faiss.search(
                 np.expand_dims(query_vec, axis=0),
                 len(self.row_ids),
@@ -1194,7 +1200,7 @@ class HybridRetriever:
             if self._trajectory_faiss is None:
                 idx = faiss.IndexFlatIP(int(embeddings.shape[1]))
                 idx.add(np.asarray(embeddings, dtype=np.float32))
-                self._trajectory_faiss = _to_gpu_index(idx)
+                self._trajectory_faiss = _to_gpu_index(idx, max_k=len(self.row_ids))
             scores, indices = self._trajectory_faiss.search(
                 np.expand_dims(query_vec, axis=0),
                 len(self.row_ids),
