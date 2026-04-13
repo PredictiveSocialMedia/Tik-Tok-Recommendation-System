@@ -68,6 +68,7 @@ DEFAULT_RETRIEVAL_EVAL_PARALLEL_WORKERS = _scaled_parallel_default(divisor=8, ca
 DEFAULT_BLEND_SEARCH_PARALLEL_WORKERS = _scaled_parallel_default(divisor=8, cap=8)
 # Phase 2 only has a few objectives, so modest parallelism is enough.
 DEFAULT_PHASE2_PARALLEL_WORKERS = min(3, CPU_COUNT)
+DEFAULT_PHASE1_PROFILE = "artifact_fast"
 
 
 def _elapsed(start: float) -> str:
@@ -310,6 +311,8 @@ def step_train_recommender(
     )
     logger.info("Retriever eval parallel workers: %d", retrieval_eval_parallel_workers)
     logger.info("Blend search parallel workers: %d", blend_search_parallel_workers)
+    phase1_profile = str(os.getenv("PHASE1_PROFILE", DEFAULT_PHASE1_PROFILE)).strip() or DEFAULT_PHASE1_PROFILE
+    logger.info("Phase 1 profile: %s", phase1_profile)
 
     result = train_recommender_from_datamart(
         datamart=datamart,
@@ -345,6 +348,7 @@ def step_train_recommender(
             datamart_version=str(datamart.get("version", "datamart.v1")),
             retrieval_eval_parallel_workers=retrieval_eval_parallel_workers,
             blend_search_parallel_workers=blend_search_parallel_workers,
+            phase1_profile=phase1_profile,
         ),
     )
 

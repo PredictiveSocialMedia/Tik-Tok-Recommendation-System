@@ -278,6 +278,38 @@ def test_train_recommender_from_datamart_creates_baseline_artifacts(tmp_path: Pa
         assert ablation_path.exists()
 
 
+def test_train_recommender_fast_profile_skips_ablation_and_uses_validation_eval(tmp_path: Path):
+    mart = make_datamart()
+    result = train_recommender_from_datamart(
+        datamart=mart,
+        artifact_root=tmp_path,
+        config=RecommenderTrainingConfig(
+            objectives=("reach", "engagement", "conversion"),
+            retrieve_k=50,
+            run_name="test-recommender-fast",
+            phase1_profile="artifact_fast",
+        ),
+    )
+    bundle_dir = Path(result["bundle_dir"])
+    manifest = json.loads((bundle_dir / "manifest.json").read_text(encoding="utf-8"))
+    objective_metrics = json.loads(
+        (bundle_dir / "metrics" / "objective_metrics.json").read_text(encoding="utf-8")
+    )
+    assert manifest["phase1_profile"] == "artifact_fast"
+    for objective in ("reach", "engagement", "conversion"):
+        ablation_meta = manifest["objective_ablation_reports"][objective]
+        ablation_payload = json.loads(
+            (bundle_dir / str(ablation_meta["path"])).read_text(encoding="utf-8")
+        )
+        assert ablation_payload["phase1_profile"] == "artifact_fast"
+        assert ablation_payload["retriever_ablation"]["skipped"] is True
+        assert (
+            ablation_payload["retriever_ablation"]["reason"]
+            == "artifact_fast_profile"
+        )
+        assert objective_metrics[objective]["phase1_profile"] == "artifact_fast"
+
+
 def test_artifact_registry_compatibility_check(tmp_path: Path):
     mart = make_datamart()
     result = train_recommender_from_datamart(
