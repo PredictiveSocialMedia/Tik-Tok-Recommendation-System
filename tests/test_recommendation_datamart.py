@@ -828,6 +828,37 @@ def test_build_training_data_mart_builds_pair_rows_with_time_order():
         assert 0 <= pair["relevance_label"] <= 3
 
 
+def test_build_training_data_mart_parallel_pair_rows_match_serial():
+    bundle = make_split_bundle()
+    serial = build_training_data_mart(
+        bundle,
+        config=BuildTrainingDataMartConfig(
+            include_pair_rows=True,
+            pair_candidates_per_query=4,
+            parallel_workers=1,
+        ),
+    )
+    parallel = build_training_data_mart(
+        bundle,
+        config=BuildTrainingDataMartConfig(
+            include_pair_rows=True,
+            pair_candidates_per_query=4,
+            parallel_workers=2,
+        ),
+    )
+    serial_pairs = sorted(
+        serial["pair_rows"],
+        key=lambda row: (row["objective"], row["pair_id"]),
+    )
+    parallel_pairs = sorted(
+        parallel["pair_rows"],
+        key=lambda row: (row["objective"], row["pair_id"]),
+    )
+    assert parallel["stats"]["pair_rows_total"] == serial["stats"]["pair_rows_total"]
+    assert parallel["stats"]["pair_rows_dropped_by_reason"] == serial["stats"]["pair_rows_dropped_by_reason"]
+    assert parallel_pairs == serial_pairs
+
+
 def test_build_training_data_mart_pair_target_source_trajectory_skips_unavailable():
     bundle = make_split_bundle()
     payload = bundle.model_dump(mode="python")
@@ -884,6 +915,8 @@ def test_build_training_data_mart_config_validation():
         BuildTrainingDataMartConfig(label_window_hours=0)
     with pytest.raises(ValueError):
         BuildTrainingDataMartConfig(pair_candidates_per_query=0)
+    with pytest.raises(ValueError):
+        BuildTrainingDataMartConfig(parallel_workers=0)
     with pytest.raises(ValueError):
         BuildTrainingDataMartConfig(pair_target_source="bad")
     with pytest.raises(ValueError):

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -160,6 +161,12 @@ def main() -> int:
         help="Objective used when materializing datamart pair_rows.",
     )
     parser.add_argument(
+        "--parallel-workers",
+        type=int,
+        default=int(os.getenv("DATAMART_PARALLEL_WORKERS", "1")),
+        help="Worker process count for pair-row materialization.",
+    )
+    parser.add_argument(
         "--enable-trajectory-labels",
         dest="enable_trajectory_labels",
         action="store_true",
@@ -196,6 +203,7 @@ def main() -> int:
         label_window_hours=args.label_window_hours,
         pair_objective=str(args.pair_objective),
         pair_target_source=args.pair_target_source,
+        parallel_workers=max(1, int(args.parallel_workers)),
         enable_trajectory_labels=bool(args.enable_trajectory_labels),
         as_of_run_time=(
             parse_iso_datetime(args.as_of_run_time) if args.as_of_run_time else None

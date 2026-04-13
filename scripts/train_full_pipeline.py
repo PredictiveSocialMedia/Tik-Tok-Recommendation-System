@@ -48,6 +48,7 @@ DEFAULT_MAX_AGE_DAYS = 180
 DEFAULT_DENSE_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_GRAPH_EMBEDDING_DIM = 32
 DEFAULT_TRAJECTORY_EMBEDDING_DIM = 16
+DEFAULT_DATAMART_PARALLEL_WORKERS = max(1, min(8, os.cpu_count() or 1))
 
 
 def _elapsed(start: float) -> str:
@@ -204,16 +205,23 @@ def step_build_datamart(
     if comment_feature_manifest_path:
         config_kwargs["comment_feature_manifest_path"] = comment_feature_manifest_path
 
+    parallel_workers = max(
+        1,
+        int(os.getenv("DATAMART_PARALLEL_WORKERS", str(DEFAULT_DATAMART_PARALLEL_WORKERS))),
+    )
+
     config = BuildTrainingDataMartConfig(
         track="post_publication",
         min_history_hours=24,
         label_window_hours=72,
         pair_objective="engagement",
         pair_target_source="scalar_v1",
+        parallel_workers=parallel_workers,
         enable_trajectory_labels=True,
         trajectory_windows_hours=(6, 24, 96),
         **config_kwargs,
     )
+    logger.info("DataMart parallel workers: %d", parallel_workers)
 
     mart = build_training_data_mart_from_manifest(
         manifest_ref=manifest_path,

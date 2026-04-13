@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from concurrent.futures import ProcessPoolExecutor
+import heapq
 import math
 import hashlib
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -60,6 +63,7 @@ class BuildTrainingDataMartConfig:
     pair_objective: str = "engagement"
     pair_target_source: str = "scalar_v1"
     pair_candidates_per_query: int = 8
+    parallel_workers: int = 1
     as_of_run_time: Optional[datetime] = None
     enable_trajectory_labels: bool = True
     trajectory_windows_hours: Tuple[int, int, int] = DEFAULT_TRAJECTORY_WINDOWS_HOURS
@@ -98,6 +102,9 @@ class BuildTrainingDataMartConfig:
             raise ValueError("min_author_rows_for_baseline must be >= 1.")
         if self.pair_candidates_per_query < 1:
             raise ValueError("pair_candidates_per_query must be >= 1.")
+        if int(self.parallel_workers) < 1:
+            raise ValueError("parallel_workers must be >= 1.")
+        self.parallel_workers = int(self.parallel_workers)
         if len(self.trajectory_windows_hours) != 3:
             raise ValueError("trajectory_windows_hours must contain exactly 3 values.")
         trajectory_hours = tuple(int(value) for value in self.trajectory_windows_hours)
@@ -965,9 +972,8 @@ def _build_pair_rows(
     objective: str,
     target_source: str,
     max_candidates: int,
+    parallel_workers: int = 1,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
-    pair_rows: List[Dict[str, Any]] = []
-    dropped_by_reason: Dict[str, int] = {}
     row_tokens: Dict[str, List[str]] = {}
     for row in rows:
         row_tokens[row["row_id"]] = _dedupe(
@@ -984,7 +990,98 @@ def _build_pair_rows(
             ]
         )
 
-    for query in rows:
+    if parallel_workers <= 1 or len(rows) < 32:
+        return _build_pair_rows_for_queries(
+            query_rows=list(rows),
+            candidate_rows=list(rows),
+            row_tokens=row_tokens,
+            objective=objective,
+            target_source=target_source,
+            max_candidates=max_candidates,
+        )
+
+    query_rows = list(rows)
+    chunk_size = max(8, math.ceil(len(query_rows) / max(1, parallel_workers * 4)))
+    query_chunks = [
+        query_rows[index : index + chunk_size]
+        for index in range(0, len(query_rows), chunk_size)
+    ]
+
+    pair_rows: List[Dict[str, Any]] = []
+    dropped_by_reason: Dict[str, int] = {}
+    worker_count = min(parallel_workers, len(query_chunks))
+    with ProcessPoolExecutor(
+        max_workers=worker_count,
+        initializer=_init_pair_row_worker,
+        initargs=(
+            list(rows),
+            row_tokens,
+            objective,
+            target_source,
+            max_candidates,
+        ),
+    ) as executor:
+        for chunk_pair_rows, chunk_drops in executor.map(
+            _build_pair_rows_for_query_subset,
+            query_chunks,
+        ):
+            pair_rows.extend(chunk_pair_rows)
+            for key, value in chunk_drops.items():
+                dropped_by_reason[key] = dropped_by_reason.get(key, 0) + value
+
+    return pair_rows, dropped_by_reason
+
+
+_PAIR_ROW_WORKER_ROWS: List[Dict[str, Any]] = []
+_PAIR_ROW_WORKER_TOKENS: Dict[str, List[str]] = {}
+_PAIR_ROW_WORKER_OBJECTIVE: str = "engagement"
+_PAIR_ROW_WORKER_TARGET_SOURCE: str = "scalar_v1"
+_PAIR_ROW_WORKER_MAX_CANDIDATES: int = 8
+
+
+def _init_pair_row_worker(
+    rows: List[Dict[str, Any]],
+    row_tokens: Dict[str, List[str]],
+    objective: str,
+    target_source: str,
+    max_candidates: int,
+) -> None:
+    global _PAIR_ROW_WORKER_ROWS
+    global _PAIR_ROW_WORKER_TOKENS
+    global _PAIR_ROW_WORKER_OBJECTIVE
+    global _PAIR_ROW_WORKER_TARGET_SOURCE
+    global _PAIR_ROW_WORKER_MAX_CANDIDATES
+    _PAIR_ROW_WORKER_ROWS = rows
+    _PAIR_ROW_WORKER_TOKENS = row_tokens
+    _PAIR_ROW_WORKER_OBJECTIVE = objective
+    _PAIR_ROW_WORKER_TARGET_SOURCE = target_source
+    _PAIR_ROW_WORKER_MAX_CANDIDATES = max_candidates
+
+
+def _build_pair_rows_for_query_subset(
+    query_rows: Sequence[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+    return _build_pair_rows_for_queries(
+        query_rows=query_rows,
+        candidate_rows=_PAIR_ROW_WORKER_ROWS,
+        row_tokens=_PAIR_ROW_WORKER_TOKENS,
+        objective=_PAIR_ROW_WORKER_OBJECTIVE,
+        target_source=_PAIR_ROW_WORKER_TARGET_SOURCE,
+        max_candidates=_PAIR_ROW_WORKER_MAX_CANDIDATES,
+    )
+
+
+def _build_pair_rows_for_queries(
+    query_rows: Sequence[Dict[str, Any]],
+    candidate_rows: Sequence[Dict[str, Any]],
+    row_tokens: Dict[str, List[str]],
+    objective: str,
+    target_source: str,
+    max_candidates: int,
+) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+    pair_rows: List[Dict[str, Any]] = []
+    dropped_by_reason: Dict[str, int] = {}
+    for query in query_rows:
         query_as_of = query["as_of_time"]
         if target_source == "trajectory_v2_composite":
             query_available = (
@@ -998,17 +1095,21 @@ def _build_pair_rows(
                 )
                 continue
         query_tokens = row_tokens.get(query["row_id"], [])
-        candidates: List[Tuple[float, Dict[str, Any]]] = []
-        for candidate in rows:
-            if candidate["row_id"] == query["row_id"]:
-                continue
-            if candidate["as_of_time"] >= query_as_of:
-                continue
-            similarity = _jaccard(query_tokens, row_tokens.get(candidate["row_id"], []))
-            candidates.append((similarity, candidate))
+        candidates = heapq.nlargest(
+            max_candidates,
+            (
+                (
+                    _jaccard(query_tokens, row_tokens.get(candidate["row_id"], [])),
+                    candidate,
+                )
+                for candidate in candidate_rows
+                if candidate["row_id"] != query["row_id"]
+                and candidate["as_of_time"] < query_as_of
+            ),
+            key=lambda item: item[0],
+        )
 
-        candidates.sort(key=lambda item: item[0], reverse=True)
-        for similarity, candidate in candidates[:max_candidates]:
+        for similarity, candidate in candidates:
             score = _objective_score(candidate, objective, target_source=target_source)
             if score is None:
                 dropped_by_reason["candidate_target_unavailable"] = (
@@ -1079,6 +1180,19 @@ def _build_pair_rows(
     return pair_rows, dropped_by_reason
 
 
+def _resolved_parallel_workers(requested: int) -> int:
+    if requested > 1:
+        return requested
+    raw_env = str(os.getenv("DATAMART_PARALLEL_WORKERS", "")).strip()
+    if raw_env:
+        try:
+            parsed = int(raw_env)
+        except ValueError:
+            parsed = 1
+        return max(1, parsed)
+    return 1
+
+
 def _append_exclusion(
     excluded_video_records: List[Dict[str, str]],
     video_id: str,
@@ -1101,6 +1215,7 @@ def build_training_data_mart(
     source_manifest_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     cfg = config or BuildTrainingDataMartConfig()
+    effective_parallel_workers = _resolved_parallel_workers(cfg.parallel_workers)
 
     contract_errors = validate_contract_bundle(bundle)
     if contract_errors:
@@ -1783,6 +1898,7 @@ def build_training_data_mart(
                 objective=_pair_obj,
                 target_source=cfg.pair_target_source,
                 max_candidates=cfg.pair_candidates_per_query,
+                parallel_workers=effective_parallel_workers,
             )
             pair_rows.extend(_obj_pairs)
             for _k, _v in _obj_drops.items():
@@ -1932,6 +2048,7 @@ def build_training_data_mart(
             "pair_objective": cfg.pair_objective,
             "pair_target_source": cfg.pair_target_source,
             "pair_candidates_per_query": cfg.pair_candidates_per_query,
+            "parallel_workers": effective_parallel_workers,
             "as_of_run_time": run_cutoff,
             "enable_trajectory_labels": cfg.enable_trajectory_labels,
             "trajectory_windows_hours": cfg.trajectory_windows_hours,
