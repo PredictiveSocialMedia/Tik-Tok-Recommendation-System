@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -48,6 +49,11 @@ def main() -> int:
     parser.add_argument("--early-window-hours", type=int, default=24)
     parser.add_argument("--late-window-hours", type=int, default=96)
     parser.add_argument("--min-comments-for-stable", type=int, default=3)
+    parser.add_argument(
+        "--parallel-workers",
+        type=int,
+        default=int(os.getenv("COMMENT_INTELLIGENCE_PARALLEL_WORKERS", "1")),
+    )
     args = parser.parse_args()
 
     as_of = parse_iso_datetime(args.as_of_time)
@@ -81,6 +87,7 @@ def main() -> int:
             early_window_hours=max(1, int(args.early_window_hours)),
             late_window_hours=max(2, int(args.late_window_hours)),
             min_comments_for_stable=max(1, int(args.min_comments_for_stable)),
+            parallel_workers=max(1, int(args.parallel_workers)),
         ),
     )
     print(json.dumps(payload, indent=2, ensure_ascii=False))

@@ -49,6 +49,10 @@ DEFAULT_DENSE_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_GRAPH_EMBEDDING_DIM = 32
 DEFAULT_TRAJECTORY_EMBEDDING_DIM = 16
 DEFAULT_DATAMART_PARALLEL_WORKERS = max(1, min(8, os.cpu_count() or 1))
+DEFAULT_COMMENT_INTELLIGENCE_PARALLEL_WORKERS = max(1, min(8, os.cpu_count() or 1))
+DEFAULT_RETRIEVAL_EVAL_PARALLEL_WORKERS = max(1, min(16, os.cpu_count() or 1))
+DEFAULT_BLEND_SEARCH_PARALLEL_WORKERS = max(1, min(16, os.cpu_count() or 1))
+DEFAULT_PHASE2_PARALLEL_WORKERS = 3
 
 
 def _elapsed(start: float) -> str:
@@ -163,6 +167,19 @@ def step_build_comment_intelligence(
         early_window_hours=24,
         late_window_hours=96,
         min_comments_for_stable=3,
+        parallel_workers=max(
+            1,
+            int(
+                os.getenv(
+                    "COMMENT_INTELLIGENCE_PARALLEL_WORKERS",
+                    str(DEFAULT_COMMENT_INTELLIGENCE_PARALLEL_WORKERS),
+                )
+            ),
+        ),
+    )
+    logger.info(
+        "Comment intelligence parallel workers: %d",
+        int(config.parallel_workers),
     )
 
     payload = build_comment_intelligence_snapshot_manifest(
@@ -258,6 +275,26 @@ def step_train_recommender(
     t0 = time.time()
     with open(datamart_json, "r", encoding="utf-8") as f:
         datamart = json.load(f)
+    retrieval_eval_parallel_workers = max(
+        1,
+        int(
+            os.getenv(
+                "RETRIEVAL_EVAL_PARALLEL_WORKERS",
+                str(DEFAULT_RETRIEVAL_EVAL_PARALLEL_WORKERS),
+            )
+        ),
+    )
+    blend_search_parallel_workers = max(
+        1,
+        int(
+            os.getenv(
+                "BLEND_SEARCH_PARALLEL_WORKERS",
+                str(DEFAULT_BLEND_SEARCH_PARALLEL_WORKERS),
+            )
+        ),
+    )
+    logger.info("Retriever eval parallel workers: %d", retrieval_eval_parallel_workers)
+    logger.info("Blend search parallel workers: %d", blend_search_parallel_workers)
 
     result = train_recommender_from_datamart(
         datamart=datamart,
@@ -291,6 +328,8 @@ def step_train_recommender(
             trajectory_encoder_mode="feature_only",
             contract_version=str(datamart.get("source_contract_version", "contract.v2")),
             datamart_version=str(datamart.get("version", "datamart.v1")),
+            retrieval_eval_parallel_workers=retrieval_eval_parallel_workers,
+            blend_search_parallel_workers=blend_search_parallel_workers,
         ),
     )
 
@@ -352,6 +391,10 @@ def step_train_reranker(
         bootstrap_include_neutral_pairs=True,
         feedback_max_served_rank=10,
         update_latest=True,
+        parallel_workers=max(
+            1,
+            int(os.getenv("PHASE2_PARALLEL_WORKERS", str(DEFAULT_PHASE2_PARALLEL_WORKERS))),
+        ),
     )
 
     if result.get("feedback_db_error"):

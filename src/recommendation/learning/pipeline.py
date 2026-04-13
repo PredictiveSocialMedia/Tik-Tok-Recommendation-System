@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import logging
@@ -118,6 +119,8 @@ class RecommenderTrainingConfig:
     # O(grid_candidates × all_validation_queries) blow-ups on large datamarts.
     blend_grid_levels: int = 3
     blend_search_max_eval_queries: int = 128
+    retrieval_eval_parallel_workers: int = 1
+    blend_search_parallel_workers: int = 1
 
     def __post_init__(self) -> None:
         if self.pair_target_source not in VALID_PAIR_TARGET_SOURCES:
@@ -141,6 +144,10 @@ class RecommenderTrainingConfig:
             raise ValueError("blend_grid_levels must be between 2 and 11 (inclusive).")
         if self.blend_search_max_eval_queries < 8:
             raise ValueError("blend_search_max_eval_queries must be >= 8.")
+        if self.retrieval_eval_parallel_workers < 1 or self.retrieval_eval_parallel_workers > 64:
+            raise ValueError("retrieval_eval_parallel_workers must be between 1 and 64.")
+        if self.blend_search_parallel_workers < 1 or self.blend_search_parallel_workers > 64:
+            raise ValueError("blend_search_parallel_workers must be between 1 and 64.")
 
 
 class HybridRetrieverTrainer:
@@ -453,6 +460,7 @@ def _evaluate_retriever_objective(
     max_age_days: int,
     weight_override: Optional[Dict[str, float]] = None,
     eval_split: Optional[str] = None,
+    parallel_workers: int = 1,
 ) -> Dict[str, float]:
     pool_builder = TemporalCandidatePool(
         TemporalCandidatePoolConfig(
@@ -465,16 +473,17 @@ def _evaluate_retriever_objective(
         eval_queries = list(rows_split.get(str(eval_split), []))
     else:
         eval_queries = rows_split["validation"] + rows_split["test"]
-    query_payloads: List[Dict[str, Any]] = []
-    for query in eval_queries:
+    candidate_rows = rows_split["train"] + rows_split["validation"]
+
+    def _evaluate_query(query: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         query_id = str(query.get("row_id"))
         rel = relevance_by_query.get(query_id, {})
         relevant_ids = [cid for cid, score in rel.items() if score >= 2.0]
         if not relevant_ids:
-            continue
+            return None
         pool = pool_builder.for_query(
             query_row=query,
-            candidate_rows=rows_split["train"] + rows_split["validation"],
+            candidate_rows=candidate_rows,
             index_cutoff_time=query.get("as_of_time"),
         )
         items = retriever.retrieve(
@@ -486,13 +495,24 @@ def _evaluate_retriever_objective(
             retrieval_constraints={"max_age_days": max_age_days},
             weight_override=weight_override,
         )
-        query_payloads.append(
-            {
-                "query_id": query_id,
-                "items": items,
-                "relevant_ids": relevant_ids,
-            }
-        )
+        return {
+            "query_id": query_id,
+            "items": items,
+            "relevant_ids": relevant_ids,
+        }
+
+    query_payloads: List[Dict[str, Any]] = []
+    workers = max(1, min(int(parallel_workers), len(eval_queries)))
+    if workers > 1 and len(eval_queries) > 1:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            for payload in executor.map(_evaluate_query, eval_queries):
+                if payload is not None:
+                    query_payloads.append(payload)
+    else:
+        for query in eval_queries:
+            payload = _evaluate_query(query)
+            if payload is not None:
+                query_payloads.append(payload)
     return evaluate_retrieval(query_payloads, top_k=retrieve_k)
 
 
@@ -504,6 +524,7 @@ def _evaluate_retriever_ablation_objective(
     relevance_by_query: Dict[str, Dict[str, float]],
     retrieve_k: int,
     max_age_days: int,
+    parallel_workers: int = 1,
 ) -> Dict[str, Any]:
     base_weights = retriever.branch_weights(objective)
     variants = _retriever_ablation_variants(base_weights)
@@ -518,6 +539,7 @@ def _evaluate_retriever_ablation_objective(
             retrieve_k=retrieve_k,
             max_age_days=max_age_days,
             weight_override=weights,
+            parallel_workers=parallel_workers,
         )
         evaluated[name] = {
             "dropped_branches": list(variant["dropped_branches"]),
@@ -594,6 +616,7 @@ def _learn_objective_blend_weights(
     blend_grid_levels: int = 3,
     blend_search_max_eval_queries: int = 128,
     random_seed: int = 13,
+    parallel_workers: int = 1,
 ) -> Dict[str, float]:
     pool_builder = TemporalCandidatePool(
         TemporalCandidatePoolConfig(
@@ -677,36 +700,51 @@ def _learn_objective_blend_weights(
 
     best = retriever.branch_weights(objective)
     best_score = -1.0
+    candidate_rows = rows_split["train"] + rows_split["validation"]
+
+    def _recall_for_query(query: Dict[str, Any], weights: Dict[str, float]) -> Optional[float]:
+        query_id = str(query.get("row_id"))
+        rel = relevance_by_query.get(query_id, {})
+        relevant_ids = {cid for cid, score in rel.items() if float(score) >= 2.0}
+        if not relevant_ids:
+            return None
+        pool = pool_builder.for_query(
+            query_row=query,
+            candidate_rows=candidate_rows,
+            index_cutoff_time=query.get("as_of_time"),
+        )
+        items = retriever.retrieve(
+            query_row=query,
+            candidate_rows=pool,
+            top_k=retrieve_k,
+            index_cutoff_time=query.get("as_of_time"),
+            objective=objective,
+            retrieval_constraints={"max_age_days": max_age_days},
+            weight_override=weights,
+        )
+        ranked = [str(item.get("candidate_row_id")) for item in items]
+        return recall_at_k(ranked, relevant_ids, min(100, retrieve_k))
+
     for cand_idx, weights in enumerate(candidates):
         if cand_idx % max(1, len(candidates) // 10) == 0 or cand_idx == len(candidates) - 1:
             prog = f"[blend_search] objective={objective} weight_grid {cand_idx + 1}/{len(candidates)}"
             logger.warning(prog)
             print(prog, file=sys.stderr, flush=True)
         recalls: List[float] = []
-        for query in eval_slice:
-            query_id = str(query.get("row_id"))
-            rel = relevance_by_query.get(query_id, {})
-            relevant_ids = {
-                cid for cid, score in rel.items() if float(score) >= 2.0
-            }
-            if not relevant_ids:
-                continue
-            pool = pool_builder.for_query(
-                query_row=query,
-                candidate_rows=rows_split["train"] + rows_split["validation"],
-                index_cutoff_time=query.get("as_of_time"),
-            )
-            items = retriever.retrieve(
-                query_row=query,
-                candidate_rows=pool,
-                top_k=retrieve_k,
-                index_cutoff_time=query.get("as_of_time"),
-                objective=objective,
-                retrieval_constraints={"max_age_days": max_age_days},
-                weight_override=weights,
-            )
-            ranked = [str(item.get("candidate_row_id")) for item in items]
-            recalls.append(recall_at_k(ranked, relevant_ids, min(100, retrieve_k)))
+        workers = max(1, min(int(parallel_workers), len(eval_slice)))
+        if workers > 1 and len(eval_slice) > 1:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                for value in executor.map(
+                    lambda query: _recall_for_query(query, weights),
+                    eval_slice,
+                ):
+                    if value is not None:
+                        recalls.append(value)
+        else:
+            for query in eval_slice:
+                value = _recall_for_query(query, weights)
+                if value is not None:
+                    recalls.append(value)
         mean_score = sum(recalls) / len(recalls) if recalls else 0.0
         if mean_score > best_score:
             best_score = mean_score
@@ -1115,6 +1153,7 @@ def train_recommender_from_datamart(
             blend_grid_levels=cfg.blend_grid_levels,
             blend_search_max_eval_queries=cfg.blend_search_max_eval_queries,
             random_seed=cfg.random_seed,
+            parallel_workers=cfg.blend_search_parallel_workers,
         )
         sparse_baseline_weights = _sparse_only_retrieval_weights()
         learned_validation_eval = _evaluate_retriever_objective(
@@ -1126,6 +1165,7 @@ def train_recommender_from_datamart(
             max_age_days=cfg.max_age_days,
             weight_override=learned_weights,
             eval_split="validation",
+            parallel_workers=cfg.retrieval_eval_parallel_workers,
         )
         sparse_validation_eval = _evaluate_retriever_objective(
             retriever=retriever,
@@ -1136,6 +1176,7 @@ def train_recommender_from_datamart(
             max_age_days=cfg.max_age_days,
             weight_override=sparse_baseline_weights,
             eval_split="validation",
+            parallel_workers=cfg.retrieval_eval_parallel_workers,
         )
         learned_test_eval = _evaluate_retriever_objective(
             retriever=retriever,
@@ -1146,6 +1187,7 @@ def train_recommender_from_datamart(
             max_age_days=cfg.max_age_days,
             weight_override=learned_weights,
             eval_split="test",
+            parallel_workers=cfg.retrieval_eval_parallel_workers,
         )
         sparse_test_eval = _evaluate_retriever_objective(
             retriever=retriever,
@@ -1156,6 +1198,7 @@ def train_recommender_from_datamart(
             max_age_days=cfg.max_age_days,
             weight_override=sparse_baseline_weights,
             eval_split="test",
+            parallel_workers=cfg.retrieval_eval_parallel_workers,
         )
         retriever_weight_gate = _select_retriever_weight_variant(
             learned_weights=learned_weights,
@@ -1176,6 +1219,7 @@ def train_recommender_from_datamart(
             relevance_by_query=relevance_by_query,
             retrieve_k=cfg.retrieve_k,
             max_age_days=cfg.max_age_days,
+            parallel_workers=cfg.retrieval_eval_parallel_workers,
         )
         retriever_ablation = _evaluate_retriever_ablation_objective(
             retriever=retriever,
@@ -1184,6 +1228,7 @@ def train_recommender_from_datamart(
             relevance_by_query=relevance_by_query,
             retrieve_k=cfg.retrieve_k,
             max_age_days=cfg.max_age_days,
+            parallel_workers=cfg.retrieval_eval_parallel_workers,
         )
         ranker_eval = _evaluate_baseline_ranker_objective(
             objective=effective_objective,

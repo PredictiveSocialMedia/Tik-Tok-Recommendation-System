@@ -5,6 +5,7 @@ from pathlib import Path
 
 from src.recommendation import (
     CanonicalDatasetBundle,
+    CommentIntelligenceConfig,
     build_comment_intelligence_snapshot_manifest,
     build_comment_transfer_priors,
     evaluate_comment_shadow_promotion,
@@ -187,4 +188,67 @@ def test_comment_alignment_scores_are_deterministic(tmp_path: Path) -> None:
     assert (
         rows_a[0]["features"]["alignment_shift_early_late"]
         == rows_b[0]["features"]["alignment_shift_early_late"]
+    )
+
+
+def test_comment_snapshot_parallel_matches_serial(tmp_path: Path) -> None:
+    payload = _bundle().model_dump(mode="python")
+    payload["videos"].append(
+        {
+            "video_id": "v2",
+            "author_id": "a1",
+            "caption": "Storytelling hook breakdown",
+            "hashtags": ["#story", "#tutorial"],
+            "keywords": ["hook", "storytelling"],
+            "search_query": "storytelling",
+            "posted_at": _dt("2026-03-19T00:00:00Z"),
+        }
+    )
+    payload["video_snapshots"].append(
+        {
+            "video_snapshot_id": "v2-s1",
+            "video_id": "v2",
+            "scraped_at": _dt("2026-03-21T00:00:00Z"),
+            "views": 800,
+            "likes": 60,
+            "comments_count": 6,
+            "shares": 4,
+        }
+    )
+    payload["comments"].append(
+        {
+            "comment_id": "v2::c1",
+            "video_id": "v2",
+            "text": "This pacing tip is useful",
+            "created_at": _dt("2026-03-19T01:00:00Z"),
+            "ingested_at": _dt("2026-03-19T01:10:00Z"),
+            "root_comment_id": "v2::c1",
+            "comment_level": 0,
+        }
+    )
+    bundle = CanonicalDatasetBundle.model_validate(payload)
+    serial = build_comment_intelligence_snapshot_manifest(
+        bundle=bundle,
+        as_of_time=_dt("2026-03-24T12:00:00Z"),
+        output_root=tmp_path / "serial",
+        mode="full",
+        config=CommentIntelligenceConfig(parallel_workers=1),
+    )
+    parallel = build_comment_intelligence_snapshot_manifest(
+        bundle=bundle,
+        as_of_time=_dt("2026-03-24T12:00:00Z"),
+        output_root=tmp_path / "parallel",
+        mode="full",
+        config=CommentIntelligenceConfig(parallel_workers=2),
+    )
+    _, serial_rows = load_comment_intelligence_snapshot_manifest(
+        Path(tmp_path) / "serial" / serial["comment_feature_manifest_id"] / "manifest.json"
+    )
+    _, parallel_rows = load_comment_intelligence_snapshot_manifest(
+        Path(tmp_path) / "parallel" / parallel["comment_feature_manifest_id"] / "manifest.json"
+    )
+    assert serial["stats"]["rows_total"] == parallel["stats"]["rows_total"]
+    assert serial["stats"]["missingness_by_reason"] == parallel["stats"]["missingness_by_reason"]
+    assert sorted(serial_rows, key=lambda row: row["video_id"]) == sorted(
+        parallel_rows, key=lambda row: row["video_id"]
     )

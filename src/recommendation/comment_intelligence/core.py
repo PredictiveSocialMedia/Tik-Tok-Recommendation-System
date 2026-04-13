@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import math
@@ -405,6 +406,7 @@ class CommentIntelligenceConfig(BaseModel):
     alignment_lexical_weight: float = Field(default=0.55, ge=0.0, le=1.0)
     alignment_semantic_weight: float = Field(default=0.45, ge=0.0, le=1.0)
     alignment_drift_penalty_weight: float = Field(default=0.3, ge=0.0, le=1.0)
+    parallel_workers: int = Field(default=1, ge=1, le=32)
 
     @model_validator(mode="after")
     def _validate_alignment_weights(self) -> "CommentIntelligenceConfig":
@@ -965,7 +967,6 @@ def extract_comment_intelligence_for_video(
                 "content_type_bucket": content_type_bucket,
                 "author_size_bucket": author_size_bucket,
                 "dominant_intents": dominant_intents,
-                "elapsed_ms": round(elapsed_ms, 4),
             }
         )
     )
@@ -1000,28 +1001,31 @@ def extract_comment_intelligence_snapshots(
         snapshots_by_video.setdefault(item.video_id, []).append(item)
     authors_by_id = {item.author_id: item for item in bundle.authors}
 
-    out: List[CommentIntelligenceSnapshot] = []
-    for video in bundle.videos:
+    def _extract_for_video(video: Any) -> CommentIntelligenceSnapshot:
         author = authors_by_id.get(video.author_id)
         followers = int(author.followers_count if author else 0)
-        out.append(
-            extract_comment_intelligence_for_video(
-                video_id=video.video_id,
-                posted_at=video.posted_at,
-                as_of_time=as_of_utc,
-                topic_key=_infer_topic_key(video.search_query, video.hashtags, video.caption),
-                content_type_bucket=_infer_content_type_bucket(video.caption, video.hashtags),
-                author_size_bucket=_author_size_bucket(followers),
-                caption=video.caption,
-                hashtags=video.hashtags,
-                keywords=video.keywords,
-                search_query=video.search_query,
-                comments=comments_by_video.get(video.video_id, []),
-                comment_snapshots=snapshots_by_video.get(video.video_id, []),
-                config=cfg,
-            )
+        return extract_comment_intelligence_for_video(
+            video_id=video.video_id,
+            posted_at=video.posted_at,
+            as_of_time=as_of_utc,
+            topic_key=_infer_topic_key(video.search_query, video.hashtags, video.caption),
+            content_type_bucket=_infer_content_type_bucket(video.caption, video.hashtags),
+            author_size_bucket=_author_size_bucket(followers),
+            caption=video.caption,
+            hashtags=video.hashtags,
+            keywords=video.keywords,
+            search_query=video.search_query,
+            comments=comments_by_video.get(video.video_id, []),
+            comment_snapshots=snapshots_by_video.get(video.video_id, []),
+            config=cfg,
         )
-    return out
+
+    if cfg.parallel_workers <= 1 or len(bundle.videos) < 8:
+        return [_extract_for_video(video) for video in bundle.videos]
+
+    worker_count = min(cfg.parallel_workers, len(bundle.videos))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        return list(executor.map(_extract_for_video, bundle.videos))
 
 
 def _aggregate_mean(values: Iterable[float]) -> float:

@@ -14,6 +14,7 @@ except at least one must yield supervision (see CLI validation).
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 import os
@@ -223,6 +224,7 @@ def train_phase2_reranker(
     bootstrap_include_neutral_pairs: bool,
     feedback_max_served_rank: Optional[int],
     update_latest: bool,
+    parallel_workers: int = 1,
 ) -> Dict[str, Any]:
     registry = ArtifactRegistry(artifact_root)
     output_bundle_dir = registry.create_bundle_dir(run_name=run_name)
@@ -298,7 +300,8 @@ def train_phase2_reranker(
     feedback_by_objective = dict(feedback_summary.get("by_objective") or {})
     labeling_by_objective = dict(labeling_summary.get("by_objective") or {})
     bootstrap_by_objective = dict(bootstrap_summary.get("by_objective") or {})
-    for objective in objectives:
+
+    def _train_objective(objective: str) -> Dict[str, Any]:
         objective_rows = rows_by_objective.get(objective, [])
         objective_summary = summarize_pairwise_rows(objective_rows)
         training_source_mix = {
@@ -316,10 +319,36 @@ def train_phase2_reranker(
         }
         if len(objective_rows) < max(1, int(min_pairs_per_objective)):
             objective_report["reason"] = "insufficient_pair_rows"
+            return {"objective": objective, "report": objective_report, "rows": objective_rows}
+
+        reranker = LearnedPairwiseReranker.train(objective=objective, rows=objective_rows)
+        objective_report["status"] = "trained"
+        objective_report["train_summary"] = reranker.train_summary
+        return {
+            "objective": objective,
+            "report": objective_report,
+            "rows": objective_rows,
+            "summary": objective_summary,
+            "reranker": reranker,
+        }
+
+    objective_list = [str(objective) for objective in objectives]
+    workers = max(1, min(int(parallel_workers), len(objective_list)))
+    if workers > 1 and len(objective_list) > 1:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            results = list(executor.map(_train_objective, objective_list))
+    else:
+        results = [_train_objective(objective) for objective in objective_list]
+
+    for result in results:
+        objective = str(result["objective"])
+        objective_report = dict(result["report"])
+        reranker = result.get("reranker")
+        objective_rows = list(result.get("rows") or [])
+        if reranker is None:
             objective_reports[objective] = objective_report
             continue
 
-        reranker = LearnedPairwiseReranker.train(objective=objective, rows=objective_rows)
         output_dir = output_bundle_dir / "rankers" / objective / "learned_reranker"
         reranker.save(output_dir)
 
@@ -327,7 +356,7 @@ def train_phase2_reranker(
         dataset_path.write_text(
             json.dumps(
                 {
-                    "summary": objective_summary,
+                    "summary": result["summary"],
                     "rows": rows_to_json_ready(objective_rows),
                 },
                 indent=2,
@@ -335,10 +364,8 @@ def train_phase2_reranker(
             ),
             encoding="utf-8",
         )
-        objective_report["status"] = "trained"
         objective_report["artifact_path"] = str(output_dir.relative_to(output_bundle_dir))
         objective_report["dataset_path"] = str(dataset_path.relative_to(output_bundle_dir))
-        objective_report["train_summary"] = reranker.train_summary
         objective_reports[objective] = objective_report
         trained_objectives.append(objective)
 
@@ -476,6 +503,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Update artifacts/recommender/latest after training.",
     )
+    parser.add_argument(
+        "--parallel-workers",
+        type=int,
+        default=max(1, int(os.getenv("PHASE2_PARALLEL_WORKERS", "3"))),
+        help="Parallel objective workers for phase-2 reranker training.",
+    )
     return parser.parse_args()
 
 
@@ -514,6 +547,7 @@ def main() -> None:
             None if int(args.feedback_max_served_rank) <= 0 else int(args.feedback_max_served_rank)
         ),
         update_latest=bool(args.update_latest),
+        parallel_workers=max(1, int(args.parallel_workers)),
     )
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
