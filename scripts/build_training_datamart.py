@@ -22,6 +22,9 @@ from src.recommendation import (
     build_training_data_mart_from_jsonl,
 )
 
+CPU_COUNT = max(1, os.cpu_count() or 1)
+DEFAULT_DATAMART_PARALLEL_WORKERS = max(1, min(16, max(1, CPU_COUNT // 4)))
+
 
 def _parse_csv_int_triplet(value: str) -> tuple[int, int, int]:
     parts = [item.strip() for item in value.split(",") if item.strip()]
@@ -163,7 +166,9 @@ def main() -> int:
     parser.add_argument(
         "--parallel-workers",
         type=int,
-        default=int(os.getenv("DATAMART_PARALLEL_WORKERS", "1")),
+        default=int(
+            os.getenv("DATAMART_PARALLEL_WORKERS", str(DEFAULT_DATAMART_PARALLEL_WORKERS))
+        ),
         help="Worker process count for pair-row materialization.",
     )
     parser.add_argument(

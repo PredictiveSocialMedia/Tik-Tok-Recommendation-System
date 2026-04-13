@@ -43,16 +43,30 @@ logging.basicConfig(
 logger = logging.getLogger("train_full_pipeline")
 
 # --- Pipeline defaults ---
+CPU_COUNT = max(1, os.cpu_count() or 1)
+
+
+def _scaled_parallel_default(*, divisor: int, cap: int, floor: int = 1) -> int:
+    return max(floor, min(cap, max(1, CPU_COUNT // max(1, divisor))))
+
+
 DEFAULT_RETRIEVE_K = 200
 DEFAULT_MAX_AGE_DAYS = 180
 DEFAULT_DENSE_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_GRAPH_EMBEDDING_DIM = 32
 DEFAULT_TRAJECTORY_EMBEDDING_DIM = 16
-DEFAULT_DATAMART_PARALLEL_WORKERS = max(1, min(8, os.cpu_count() or 1))
-DEFAULT_COMMENT_INTELLIGENCE_PARALLEL_WORKERS = max(1, min(8, os.cpu_count() or 1))
-DEFAULT_RETRIEVAL_EVAL_PARALLEL_WORKERS = max(1, min(16, os.cpu_count() or 1))
-DEFAULT_BLEND_SEARCH_PARALLEL_WORKERS = max(1, min(16, os.cpu_count() or 1))
-DEFAULT_PHASE2_PARALLEL_WORKERS = 3
+# Data mart pair-row generation scales well across processes and was the clearest
+# real-world speed win, so we bias upward on larger machines.
+DEFAULT_DATAMART_PARALLEL_WORKERS = _scaled_parallel_default(divisor=4, cap=16)
+# Comment intelligence is overhead-sensitive and regressed on the full dataset,
+# so keep it serial by default and let env overrides opt in.
+DEFAULT_COMMENT_INTELLIGENCE_PARALLEL_WORKERS = 1
+# Retrieval eval/blend search are read-heavy and parallel-safe, but each task can
+# still invoke BLAS/numpy work, so use a moderate cap to avoid oversubscription.
+DEFAULT_RETRIEVAL_EVAL_PARALLEL_WORKERS = _scaled_parallel_default(divisor=8, cap=8)
+DEFAULT_BLEND_SEARCH_PARALLEL_WORKERS = _scaled_parallel_default(divisor=8, cap=8)
+# Phase 2 only has a few objectives, so modest parallelism is enough.
+DEFAULT_PHASE2_PARALLEL_WORKERS = min(3, CPU_COUNT)
 
 
 def _elapsed(start: float) -> str:
