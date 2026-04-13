@@ -7,6 +7,7 @@ import argparse
 import json
 import sys
 import time
+import tempfile
 from pathlib import Path
 
 import mlflow
@@ -67,6 +68,7 @@ def main() -> int:
 
     with mlflow.start_run(run_name=bundle_dir.name):
         mlflow.log_param("bundle_dir", str(bundle_dir))
+        mlflow.log_param("bundle_name", bundle_dir.name)
         mlflow.log_param("metrics_path", str(metrics_path))
         mlflow.log_param("show_manifest", args.show_manifest)
         mlflow.log_param("show_ablation", args.show_ablation)
@@ -76,9 +78,14 @@ def main() -> int:
                 "dataset_version",
                 "retrieval_approach",
                 "embedding_model",
+                "dense_model_name",
                 "top_k",
+                "retrieve_k",
                 "graph_version",
                 "trajectory_version",
+                "graph_bundle_id",
+                "trajectory_manifest_id",
+                "index_cutoff_time",
             ]:
                 value = manifest.get(key)
                 if value is not None:
@@ -122,6 +129,24 @@ def main() -> int:
 
         runtime_seconds = time.time() - start_time
         mlflow.log_metric("runtime_seconds", runtime_seconds)
+
+        output_for_artifact = {
+            "bundle_dir": str(bundle_dir),
+            "metrics": metrics,
+        }
+        if isinstance(manifest, dict):
+            output_for_artifact["manifest"] = manifest
+
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".json",
+            delete=False,
+            encoding="utf-8",
+        ) as tmp_file:
+            json.dump(output_for_artifact, tmp_file, indent=2, ensure_ascii=False)
+            tmp_path = tmp_file.name
+
+        mlflow.log_artifact(tmp_path, artifact_path="evaluation")
 
     output = {"bundle_dir": str(bundle_dir), "metrics": metrics}
     if args.show_manifest:
