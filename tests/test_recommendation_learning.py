@@ -22,6 +22,10 @@ from src.recommendation.learning import (
     train_recommender_from_datamart,
 )
 from src.recommendation.learning.inference import ArtifactCompatibilityError
+from src.recommendation.learning.pipeline import (
+    _coordinate_adjust_weights,
+    _objective_prior_blend_weights,
+)
 
 
 def _dt(value: str) -> datetime:
@@ -192,6 +196,39 @@ def test_retriever_weight_gate_falls_back_to_sparse_when_validation_worse():
     assert gate["test"]["selected_not_worse_than_competitor"] is False
 
 
+def test_objective_prior_blend_weights_respects_active_branches():
+    weights = _objective_prior_blend_weights(
+        "engagement",
+        active_branches=("lexical", "dense_text"),
+    )
+    assert abs(sum(float(value) for value in weights.values()) - 1.0) < 1e-6
+    assert float(weights["multimodal"]) == 0.0
+    assert float(weights["graph_dense"]) == 0.0
+    assert float(weights["trajectory_dense"]) == 0.0
+    assert float(weights["lexical"]) > 0.0
+    assert float(weights["dense_text"]) > 0.0
+
+
+def test_coordinate_adjust_weights_renormalizes_and_shifts_mass():
+    proposal = _coordinate_adjust_weights(
+        {
+            "lexical": 0.45,
+            "dense_text": 0.35,
+            "multimodal": 0.20,
+            "graph_dense": 0.0,
+            "trajectory_dense": 0.0,
+        },
+        "dense_text",
+        0.10,
+        ("lexical", "dense_text", "multimodal"),
+    )
+    assert proposal is not None
+    assert abs(sum(float(value) for value in proposal.values()) - 1.0) < 1e-6
+    assert float(proposal["dense_text"]) > 0.35
+    assert float(proposal["lexical"]) < 0.45
+    assert float(proposal["multimodal"]) < 0.20
+
+
 def test_train_recommender_from_datamart_creates_baseline_artifacts(tmp_path: Path):
     mart = make_datamart()
     result = train_recommender_from_datamart(
@@ -208,8 +245,11 @@ def test_train_recommender_from_datamart_creates_baseline_artifacts(tmp_path: Pa
     assert (bundle_dir / "manifest.json").exists()
     assert (bundle_dir / "retriever" / "manifest.json").exists()
     assert (bundle_dir / "rankers" / "reach" / "baseline_manifest.json").exists()
+    assert (bundle_dir / "rankers" / "reach" / "baseline_model.pkl").exists()
     assert (bundle_dir / "rankers" / "engagement" / "baseline_manifest.json").exists()
+    assert (bundle_dir / "rankers" / "engagement" / "baseline_model.pkl").exists()
     assert (bundle_dir / "rankers" / "conversion" / "baseline_manifest.json").exists()
+    assert (bundle_dir / "rankers" / "conversion" / "baseline_model.pkl").exists()
     manifest = json.loads((bundle_dir / "manifest.json").read_text(encoding="utf-8"))
     objective_metrics = json.loads(
         (bundle_dir / "metrics" / "objective_metrics.json").read_text(encoding="utf-8")
@@ -224,6 +264,12 @@ def test_train_recommender_from_datamart_creates_baseline_artifacts(tmp_path: Pa
         assert objective in objective_metrics
         assert "retriever" in objective_metrics[objective]
         assert "ranker" in objective_metrics[objective]
+        baseline_manifest = json.loads(
+            (bundle_dir / "rankers" / objective / "baseline_manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert baseline_manifest["ranker_id"] == "baseline_logreg"
         assert "ndcg@10" in objective_metrics[objective]["ranker"]
         assert "mrr@20" in objective_metrics[objective]["ranker"]
         assert "recall@100" in objective_metrics[objective]["retriever"]
@@ -313,6 +359,7 @@ def test_recommender_runtime_community_objective_returns_effective_model(tmp_pat
     assert isinstance(response["items"], list)
     assert len(response["items"]) > 0
     first_item = response["items"][0]
+    assert first_item["selected_ranker_id"] == "baseline_logreg"
     assert isinstance(first_item.get("comment_trace"), dict)
     assert "alignment_score" in first_item["comment_trace"]
     assert "retrieval_branch_scores" in first_item

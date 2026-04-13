@@ -58,6 +58,7 @@ from .objectives import map_objective
 from .policy import PolicyReranker, PolicyRerankerConfig
 from .query_contract import build_query_profile
 from .ranking_baseline import rank_shortlist
+from .ranking_baseline import BaselineLogisticRanker, BASELINE_LOGISTIC_RANKER_ID
 from .retrieval_baseline import (
     hashtag_topic_score,
     retrieve_shortlist,
@@ -919,10 +920,29 @@ class RecommenderRuntime:
             str(objective): {"ranker_id": "baseline_weighted"}
             for objective in list(manifest.get("objectives") or [])
         }
+        self.baseline_rankers: Dict[str, BaselineLogisticRanker] = {}
         self.learned_rerankers: Dict[str, LearnedPairwiseReranker] = {}
         self.learned_reranker_load_warnings: Dict[str, str] = {}
         self.calibrators: Dict[str, _IdentityCalibrator] = {}
         self.calibration_load_warnings: Dict[str, str] = {}
+        for objective in self.rankers.keys():
+            baseline_manifest_path = bundle_dir / "rankers" / objective / "baseline_manifest.json"
+            baseline_model_path = bundle_dir / "rankers" / objective / "baseline_model.pkl"
+            if baseline_manifest_path.exists() and baseline_model_path.exists():
+                try:
+                    baseline_ranker = BaselineLogisticRanker.load(bundle_dir / "rankers" / objective)
+                    baseline_manifest = json.loads(
+                        baseline_manifest_path.read_text(encoding="utf-8")
+                    )
+                    self.baseline_rankers[objective] = baseline_ranker
+                    self.rankers[objective] = {
+                        "ranker_id": BASELINE_LOGISTIC_RANKER_ID,
+                        "version": str(
+                            baseline_manifest.get("version") or BASELINE_RANKER_VERSION
+                        ),
+                    }
+                except Exception:
+                    pass
         for objective in self.rankers.keys():
             learned_dir = bundle_dir / "rankers" / objective / "learned_reranker"
             manifest_path = learned_dir / "manifest.json"
@@ -1539,6 +1559,7 @@ class RecommenderRuntime:
             effective_objective=effective_objective,
             portfolio=portfolio,
             rankers_available=self.rankers.keys(),
+            baseline_ranker=self.baseline_rankers.get(effective_objective),
         )
         learned_reranker_metadata: Dict[str, Any] = {
             "enabled": effective_objective in self.learned_rerankers,

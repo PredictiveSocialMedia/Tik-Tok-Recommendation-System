@@ -8,19 +8,15 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
+from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
-
-try:
-    import lightgbm as lgb  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
-    lgb = None
 
 from .artifacts import ArtifactRegistry
 from .baseline_common import as_float, round_score, sanitize_probability
 
 
 LEARNED_RERANKER_VERSION = "recommender.ranker.learned_pairwise.v1"
-LEARNED_RERANKER_ID = "learned_pairwise_lgbm"
+LEARNED_RERANKER_ID = "learned_pairwise_hgb"
 LEARNED_RERANKER_LABEL_POLICY_VERSION = "pairwise_supervision.v2"
 LEARNED_RERANKER_MIN_SHORTLIST_SIGNAL = 0.06
 LEARNED_RERANKER_FULL_AUTHORITY_PAIR_COUNT = 1500.0
@@ -238,23 +234,19 @@ class LearnedPairwiseReranker:
             [max(1e-6, float(row.pair_weight)) for row in rows], dtype=np.float32
         )
 
-        use_lightgbm = lgb is not None and len(rows) >= 24
-        if use_lightgbm:
-            model = lgb.LGBMClassifier(
-                objective="binary",
-                n_estimators=180,
+        use_hist_gradient_boosting = len(rows) >= 24
+        if use_hist_gradient_boosting:
+            model = HistGradientBoostingClassifier(
                 learning_rate=0.05,
-                num_leaves=31,
-                min_child_samples=4,
-                min_data_in_bin=1,
-                subsample=0.9,
-                colsample_bytree=0.9,
-                n_jobs=1,
-                verbosity=-1,
+                max_iter=180,
+                max_leaf_nodes=31,
+                min_samples_leaf=4,
+                l2_regularization=0.05,
+                max_bins=255,
                 random_state=int(random_state),
             )
             model.fit(x, y, sample_weight=sample_weight)
-            model_type = "lightgbm_classifier"
+            model_type = "hist_gradient_boosting_classifier"
             train_scores = model.predict_proba(x)[:, 1]
         else:
             model = LogisticRegression(

@@ -40,11 +40,12 @@ CREATOR_RETRIEVAL_VERSION = "creator_retrieval.v1"
 CREATOR_RETRIEVAL_MAX_BLEND_WEIGHT = 0.16
 CREATOR_RETRIEVAL_MIN_QUERY_GUARD = 0.20
 CREATOR_RETRIEVAL_MAX_MEMORY = 24
+DEFAULT_DENSE_MODEL_NAME = "sentence-transformers/paraphrase-MiniLM-L3-v2"
 
 
 @dataclass
 class HybridRetrieverTrainerConfig:
-    dense_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
+    dense_model_name: str = DEFAULT_DENSE_MODEL_NAME
     sparse_weight: float = 0.45
     dense_weight: float = 0.25
     multimodal_weight: float = 0.20
@@ -1744,7 +1745,7 @@ class HybridRetriever:
 
         cfg = HybridRetrieverTrainerConfig(
             dense_model_name=manifest.get("config", {}).get(
-                "dense_model_name", "sentence-transformers/all-MiniLM-L6-v2"
+                "dense_model_name", DEFAULT_DENSE_MODEL_NAME
             ),
             sparse_weight=float(manifest.get("config", {}).get("sparse_weight", 0.5)),
             dense_weight=float(manifest.get("config", {}).get("dense_weight", 0.3)),

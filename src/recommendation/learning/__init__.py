@@ -43,6 +43,7 @@ from .pipeline import (
     train_recommender_from_datamart,
 )
 from .policy import POLICY_RERANK_VERSION, PolicyReranker, PolicyRerankerConfig
+from .ranking_baseline import BASELINE_LOGISTIC_RANKER_ID, BaselineLogisticRanker
 from .retriever import HybridRetrieverTrainerConfig
 from .sampling import NegativeSampler, NegativeSamplerConfig
 from .temporal import TemporalCandidatePool, TemporalCandidatePoolConfig
@@ -70,6 +71,7 @@ __all__ = [
     "LEARNED_RERANKER_ID",
     "LEARNED_RERANKER_VERSION",
     "POLICY_RERANK_VERSION",
+    "BASELINE_LOGISTIC_RANKER_ID",
     "PolicyRerankerConfig",
     "PolicyReranker",
     "ObjectiveSpec",
@@ -106,6 +108,7 @@ __all__ = [
     "materialize_datamart_bootstrap_rows",
     "HybridRetrieverTrainer",
     "HybridRetrieverTrainerConfig",
+    "BaselineLogisticRanker",
     "USER_AFFINITY_VERSION",
     "build_user_affinity_context",
     "score_candidate_user_affinity",

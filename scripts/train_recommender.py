@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts._utils import to_jsonable
 from src.recommendation.learning import RecommenderTrainingConfig, train_recommender_from_datamart
+from src.recommendation.learning.retriever import DEFAULT_DENSE_MODEL_NAME
 
 
 def main() -> int:
@@ -54,7 +55,7 @@ def main() -> int:
     parser.add_argument(
         "--dense-model-name",
         type=str,
-        default="sentence-transformers/all-MiniLM-L6-v2",
+        default=DEFAULT_DENSE_MODEL_NAME,
     )
     parser.add_argument(
         "--pair-target-source",

@@ -13,6 +13,7 @@ from src.recommendation.learning.pipeline import (
     HybridRetrieverTrainerConfig,
     _load_feature_snapshot_vectors,
 )
+from src.recommendation.learning.retriever import DEFAULT_DENSE_MODEL_NAME
 from src.recommendation.learning.graph import GraphBuildConfig, build_creator_video_dna_graph
 from src.recommendation.learning.trajectory import (
     TrajectoryBuildConfig,
@@ -57,7 +58,7 @@ def main() -> int:
     parser.add_argument(
         "--dense-model-name",
         type=str,
-        default="sentence-transformers/all-MiniLM-L6-v2",
+        default=DEFAULT_DENSE_MODEL_NAME,
     )
     parser.add_argument(
         "--feature-snapshot-manifest-path",

@@ -31,9 +31,13 @@ from .graph import (
 from .objectives import OBJECTIVE_SPECS, map_objective
 from .policy import PolicyRerankerConfig
 from .query_contract import build_query_profile
-from .ranking_baseline import rank_shortlist
+from .ranking_baseline import BaselineLogisticRanker, rank_shortlist
 from .retrieval_baseline import retrieve_shortlist
-from .retriever import HybridRetriever, HybridRetrieverTrainerConfig
+from .retriever import (
+    DEFAULT_DENSE_MODEL_NAME,
+    HybridRetriever,
+    HybridRetrieverTrainerConfig,
+)
 from .sampling import NegativeSampler, NegativeSamplerConfig
 from .temporal import TemporalCandidatePool, TemporalCandidatePoolConfig, parse_dt, row_text, split_rows
 from .trajectory import (
@@ -55,6 +59,32 @@ RETRIEVAL_BRANCH_KEYS = (
     "graph_dense",
     "trajectory_dense",
 )
+OBJECTIVE_BLEND_PRIORS: Dict[str, Dict[str, float]] = {
+    "reach": {
+        "lexical": 0.55,
+        "dense_text": 0.30,
+        "multimodal": 0.15,
+        "graph_dense": 0.0,
+        "trajectory_dense": 0.0,
+    },
+    "engagement": {
+        "lexical": 0.40,
+        "dense_text": 0.40,
+        "multimodal": 0.20,
+        "graph_dense": 0.0,
+        "trajectory_dense": 0.0,
+    },
+    "conversion": {
+        "lexical": 0.35,
+        "dense_text": 0.30,
+        "multimodal": 0.35,
+        "graph_dense": 0.0,
+        "trajectory_dense": 0.0,
+    },
+}
+BLEND_COORDINATE_MIN_LABELED_QUERIES = 8
+BLEND_COORDINATE_GATE_MIN_GAIN = 0.01
+BLEND_COORDINATE_MAX_PASSES = 2
 BASELINE_RANKER_FEATURE_NAMES = [
     "semantic_relevance",
     "intent_alignment",
@@ -83,7 +113,7 @@ class RecommenderTrainingConfig:
     objectives: Sequence[str] = ("reach", "engagement", "conversion")
     retrieve_k: int = 200
     max_age_days: int = 180
-    dense_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
+    dense_model_name: str = DEFAULT_DENSE_MODEL_NAME
     random_seed: int = 13
     run_name: str = "recommender-v1"
     pair_target_source: str = "scalar_v1"
@@ -398,6 +428,86 @@ def _branch_dropout_weights(
     return normalized
 
 
+def _objective_prior_blend_weights(
+    objective: str,
+    active_branches: Optional[Sequence[str]] = None,
+) -> Dict[str, float]:
+    raw = dict(OBJECTIVE_BLEND_PRIORS.get(objective, OBJECTIVE_BLEND_PRIORS["engagement"]))
+    normalized = _normalize_retrieval_weights(raw)
+    if not active_branches:
+        return normalized
+    active = {str(branch) for branch in active_branches}
+    proposal = {
+        key: (float(normalized.get(key, 0.0)) if key in active else 0.0)
+        for key in RETRIEVAL_BRANCH_KEYS
+    }
+    if sum(proposal.values()) <= 0.0:
+        surviving = [key for key in RETRIEVAL_BRANCH_KEYS if key in active]
+        if not surviving:
+            return normalized
+        uniform = 1.0 / float(len(surviving))
+        proposal = {
+            key: (uniform if key in active else 0.0)
+            for key in RETRIEVAL_BRANCH_KEYS
+        }
+    return _normalize_retrieval_weights(proposal)
+
+
+def _coordinate_step_sizes(grid_levels: int) -> List[float]:
+    if grid_levels <= 2:
+        return [0.12]
+    if grid_levels == 3:
+        return [0.12, 0.06]
+    if grid_levels == 4:
+        return [0.16, 0.08, 0.04]
+    return [0.20, 0.10, 0.05]
+
+
+def _coordinate_adjust_weights(
+    weights: Dict[str, float],
+    branch: str,
+    delta: float,
+    active_branches: Sequence[str],
+) -> Optional[Dict[str, float]]:
+    active = [str(item) for item in active_branches if str(item) in RETRIEVAL_BRANCH_KEYS]
+    if branch not in active:
+        return None
+    if not active:
+        return None
+    branch = str(branch)
+    current = {key: float(weights.get(key, 0.0)) for key in RETRIEVAL_BRANCH_KEYS}
+    target = max(0.0, min(1.0, current.get(branch, 0.0) + float(delta)))
+    actual_delta = target - current.get(branch, 0.0)
+    if abs(actual_delta) < 1e-9:
+        return None
+
+    others = [key for key in active if key != branch]
+    proposal = {key: 0.0 for key in RETRIEVAL_BRANCH_KEYS}
+    proposal[branch] = target
+    if not others:
+        return _normalize_retrieval_weights(proposal)
+
+    if actual_delta > 0.0:
+        others_total = sum(current.get(key, 0.0) for key in others)
+        if others_total <= 0.0 or actual_delta > others_total + 1e-9:
+            return None
+        scale = max(0.0, (others_total - actual_delta) / others_total)
+        for key in others:
+            proposal[key] = current.get(key, 0.0) * scale
+    else:
+        freed_mass = -actual_delta
+        others_total = sum(current.get(key, 0.0) for key in others)
+        if others_total > 0.0:
+            for key in others:
+                share = current.get(key, 0.0) / others_total
+                proposal[key] = current.get(key, 0.0) + (freed_mass * share)
+        else:
+            even_share = freed_mass / float(len(others))
+            for key in others:
+                proposal[key] = even_share
+    return _normalize_retrieval_weights(proposal)
+
+
 def _retriever_ablation_variants(
     base_weights: Dict[str, float],
 ) -> Dict[str, Dict[str, Any]]:
@@ -639,7 +749,6 @@ def _learn_objective_blend_weights(
     if len(labeled) > blend_search_max_eval_queries:
         eval_slice = rng.sample(labeled, blend_search_max_eval_queries)
 
-    step_values = _blend_weight_grid_step_values(blend_grid_levels)
     current_weights = retriever.branch_weights(objective)
     active_branches = [
         b
@@ -648,58 +757,8 @@ def _learn_objective_blend_weights(
     ]
     if len(active_branches) < 2:
         active_branches = ["lexical", "dense_text", "multimodal"]
-    inactive_branches = [
-        b
-        for b in ["lexical", "dense_text", "multimodal", "graph_dense", "trajectory_dense"]
-        if b not in active_branches
-    ]
-
-    candidates: List[Dict[str, float]] = []
-    if len(active_branches) == 2:
-        for v in step_values:
-            candidates.append({active_branches[0]: v, active_branches[1]: 1.0 - v})
-    elif len(active_branches) == 3:
-        for a in step_values:
-            for b in step_values:
-                c = 1.0 - a - b
-                if c < -1e-9:
-                    continue
-                c = max(0.0, c)
-                candidates.append({active_branches[0]: a, active_branches[1]: b, active_branches[2]: c})
-    else:
-        for lexical in step_values:
-            for dense in step_values:
-                for multimodal in step_values:
-                    for trajectory_dense in step_values:
-                        graph_dense = 1.0 - lexical - dense - multimodal - trajectory_dense
-                        if graph_dense < 0:
-                            continue
-                        candidates.append(
-                            {
-                                "lexical": lexical,
-                                "dense_text": dense,
-                                "multimodal": multimodal,
-                                "graph_dense": graph_dense,
-                                "trajectory_dense": trajectory_dense,
-                            }
-                        )
-    # Zero out inactive branches
-    for cand in candidates:
-        for branch in inactive_branches:
-            cand[branch] = 0.0
-    if not candidates:
-        return retriever.branch_weights(objective)
-
-    msg = (
-        f"[blend_search] objective={objective} grid_levels={blend_grid_levels} "
-        f"weight_candidates={len(candidates)} eval_queries={len(eval_slice)} "
-        f"(labeled_validation={len(labeled)}) retrieve_k={retrieve_k}"
-    )
-    logger.warning(msg)
-    print(msg, file=sys.stderr, flush=True)
-
-    best = retriever.branch_weights(objective)
-    best_score = -1.0
+    prior_weights = _objective_prior_blend_weights(objective, active_branches)
+    sparse_weights = _sparse_only_retrieval_weights()
     candidate_rows = rows_split["train"] + rows_split["validation"]
 
     def _recall_for_query(query: Dict[str, Any], weights: Dict[str, float]) -> Optional[float]:
@@ -725,11 +784,7 @@ def _learn_objective_blend_weights(
         ranked = [str(item.get("candidate_row_id")) for item in items]
         return recall_at_k(ranked, relevant_ids, min(100, retrieve_k))
 
-    for cand_idx, weights in enumerate(candidates):
-        if cand_idx % max(1, len(candidates) // 10) == 0 or cand_idx == len(candidates) - 1:
-            prog = f"[blend_search] objective={objective} weight_grid {cand_idx + 1}/{len(candidates)}"
-            logger.warning(prog)
-            print(prog, file=sys.stderr, flush=True)
+    def _mean_recall(weights: Dict[str, float]) -> float:
         recalls: List[float] = []
         workers = max(1, min(int(parallel_workers), len(eval_slice)))
         if workers > 1 and len(eval_slice) > 1:
@@ -745,12 +800,69 @@ def _learn_objective_blend_weights(
                 value = _recall_for_query(query, weights)
                 if value is not None:
                     recalls.append(value)
-        mean_score = sum(recalls) / len(recalls) if recalls else 0.0
-        if mean_score > best_score:
-            best_score = mean_score
-            best = weights
+        return (sum(recalls) / len(recalls)) if recalls else 0.0
+
+    prior_score = _mean_recall(prior_weights)
+    sparse_score = _mean_recall(sparse_weights)
+    support_count = len(eval_slice)
+    msg = (
+        f"[blend_search] objective={objective} mode=coordinate "
+        f"eval_queries={support_count} labeled_validation={len(labeled)} "
+        f"prior_recall@100={prior_score:.6f} sparse_recall@100={sparse_score:.6f}"
+    )
+    logger.warning(msg)
+    print(msg, file=sys.stderr, flush=True)
+
+    if support_count < BLEND_COORDINATE_MIN_LABELED_QUERIES:
+        gated = (
+            f"[blend_search] objective={objective} skipped_coordinate_search "
+            f"reason=insufficient_labeled_queries threshold={BLEND_COORDINATE_MIN_LABELED_QUERIES}"
+        )
+        logger.warning(gated)
+        print(gated, file=sys.stderr, flush=True)
+        return prior_weights
+
+    if prior_score - sparse_score <= BLEND_COORDINATE_GATE_MIN_GAIN:
+        gated = (
+            f"[blend_search] objective={objective} skipped_coordinate_search "
+            f"reason=hybrid_gain_below_gate gate={BLEND_COORDINATE_GATE_MIN_GAIN:.3f}"
+        )
+        logger.warning(gated)
+        print(gated, file=sys.stderr, flush=True)
+        return prior_weights
+
+    best = dict(prior_weights)
+    best_score = prior_score
+    step_sizes = _coordinate_step_sizes(blend_grid_levels)
+    for pass_idx in range(BLEND_COORDINATE_MAX_PASSES):
+        improved = False
+        for branch in active_branches:
+            for step in step_sizes:
+                for signed_step in (float(step), -float(step)):
+                    proposal = _coordinate_adjust_weights(
+                        best,
+                        branch,
+                        signed_step,
+                        active_branches,
+                    )
+                    if proposal is None:
+                        continue
+                    score = _mean_recall(proposal)
+                    if score > best_score + 1e-6:
+                        best = proposal
+                        best_score = score
+                        improved = True
+                        prog = (
+                            f"[blend_search] objective={objective} coordinate_pass={pass_idx + 1} "
+                            f"branch={branch} delta={signed_step:+.3f} best_mean_recall@100={best_score:.6f}"
+                        )
+                        logger.warning(prog)
+                        print(prog, file=sys.stderr, flush=True)
+        if not improved:
+            break
     done = (
-        f"[blend_search] objective={objective} done best_mean_recall@100={best_score:.6f}"
+        f"[blend_search] objective={objective} done mode=coordinate "
+        f"best_mean_recall@100={best_score:.6f}"
     )
     logger.warning(done)
     print(done, file=sys.stderr, flush=True)
@@ -1122,6 +1234,7 @@ def train_recommender_from_datamart(
     objective_ablation_manifest: Dict[str, Dict[str, str]] = {}
     trained_objectives: List[str] = []
     learned_objective_blend: Dict[str, Dict[str, float]] = {}
+    rows_by_id = {str(row.get("row_id") or ""): row for row in rows}
 
     for objective in cfg.objectives:
         _, effective_objective = map_objective(objective)
@@ -1240,26 +1353,43 @@ def train_recommender_from_datamart(
 
         ranker_output_dir = rankers_dir / effective_objective
         ranker_output_dir.mkdir(parents=True, exist_ok=True)
-        baseline_manifest = {
-            "ranker_id": "baseline_weighted",
-            "version": BASELINE_RANKER_VERSION,
-            "objective": effective_objective,
-            "feature_schema_hash": ranker_feature_schema_hash,
-            "weights": OBJECTIVE_RANKING_WEIGHTS.get(
-                effective_objective,
-                DEFAULT_RANKING_WEIGHTS,
-            ),
-            "retriever_blend_weights": selected_retriever_weights,
-        }
+        baseline_ranker = BaselineLogisticRanker.train(
+            objective=effective_objective,
+            rows_by_id=rows_by_id,
+            pair_rows=objective_pair_rows,
+            target_source=cfg.pair_target_source,
+        )
+        if baseline_ranker is not None:
+            baseline_manifest = baseline_ranker.save(ranker_output_dir)
+        else:
+            baseline_manifest = {
+                "ranker_id": "baseline_weighted",
+                "version": BASELINE_RANKER_VERSION,
+                "objective": effective_objective,
+                "feature_schema_hash": ranker_feature_schema_hash,
+                "weights": OBJECTIVE_RANKING_WEIGHTS.get(
+                    effective_objective,
+                    DEFAULT_RANKING_WEIGHTS,
+                ),
+            }
         (ranker_output_dir / "baseline_manifest.json").write_text(
-            json.dumps(baseline_manifest, indent=2, ensure_ascii=False),
+            json.dumps(
+                {
+                    **baseline_manifest,
+                    "feature_schema_hash": ranker_feature_schema_hash,
+                    "retriever_blend_weights": selected_retriever_weights,
+                },
+                indent=2,
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
 
         diagnostics_payload = {
             "objective": effective_objective,
-            "ranker_id": "baseline_weighted",
-            "ranker_version": BASELINE_RANKER_VERSION,
+            "ranker_id": baseline_manifest["ranker_id"],
+            "ranker_version": baseline_manifest["version"],
+            "baseline_ranker_id": baseline_manifest["ranker_id"],
             "feature_schema_hash": ranker_feature_schema_hash,
             "retriever_weight_gate": retriever_weight_gate,
             "retriever_ablation": retriever_ablation,
@@ -1304,7 +1434,8 @@ def train_recommender_from_datamart(
             },
             "retriever": retrieval_eval,
             "ranker": ranker_eval,
-            "backend": "baseline_weighted",
+            "backend": baseline_manifest["ranker_id"],
+            "baseline_ranker_id": baseline_manifest["ranker_id"],
             "retriever_blend_weights": selected_retriever_weights,
             "retriever_weight_gate": retriever_weight_gate,
             "retriever_ablation": retriever_ablation,

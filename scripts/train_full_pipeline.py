@@ -34,6 +34,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts._utils import to_jsonable
+from src.recommendation.learning.retriever import DEFAULT_DENSE_MODEL_NAME
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,7 +53,7 @@ def _scaled_parallel_default(*, divisor: int, cap: int, floor: int = 1) -> int:
 
 DEFAULT_RETRIEVE_K = 200
 DEFAULT_MAX_AGE_DAYS = 180
-DEFAULT_DENSE_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+DEFAULT_DENSE_MODEL = DEFAULT_DENSE_MODEL_NAME
 DEFAULT_GRAPH_EMBEDDING_DIM = 32
 DEFAULT_TRAJECTORY_EMBEDDING_DIM = 16
 # Data mart pair-row generation scales well across processes and was the clearest

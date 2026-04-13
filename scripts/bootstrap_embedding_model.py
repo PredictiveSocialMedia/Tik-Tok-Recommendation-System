@@ -5,13 +5,15 @@ from __future__ import annotations
 
 import argparse
 
+from src.recommendation.learning.retriever import DEFAULT_DENSE_MODEL_NAME
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Download and cache embedding model locally.")
     parser.add_argument(
         "--model-name",
         type=str,
-        default="sentence-transformers/all-MiniLM-L6-v2",
+        default=DEFAULT_DENSE_MODEL_NAME,
     )
     args = parser.parse_args()
 
@@ -30,4 +32,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

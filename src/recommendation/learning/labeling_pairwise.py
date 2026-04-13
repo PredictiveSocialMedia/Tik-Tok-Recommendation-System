@@ -223,6 +223,7 @@ def materialize_labeling_session_rows(
                 effective_objective=objective,
                 portfolio=None,
                 rankers_available=runtime.rankers.keys(),
+                baseline_ranker=runtime.baseline_rankers.get(objective),
             )
             feature_payload_by_candidate = {
                 str(item.get("candidate_id") or ""): candidate_feature_payload_from_item(item)
@@ -244,4 +245,3 @@ def materialize_labeling_session_rows(
             )
 
     return out
-
