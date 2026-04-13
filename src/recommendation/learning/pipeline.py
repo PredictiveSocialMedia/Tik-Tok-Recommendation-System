@@ -938,6 +938,7 @@ def _evaluate_baseline_ranker_objective(
     relevance_by_query: Dict[str, Dict[str, float]],
     retrieve_k: int,
     max_age_days: int,
+    parallel_workers: int = 1,
 ) -> Dict[str, float]:
     pool_builder = TemporalCandidatePool(
         TemporalCandidatePoolConfig(
@@ -946,17 +947,18 @@ def _evaluate_baseline_ranker_objective(
             enforce_index_cutoff=True,
         )
     )
-    query_payloads: List[Dict[str, Any]] = []
-    for query_row in rows_split["validation"] + rows_split["test"]:
+    eval_queries = rows_split["validation"] + rows_split["test"]
+
+    def _evaluate_query(query_row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         query_id = str(query_row.get("row_id") or "")
         if not query_id:
-            continue
+            return None
         relevance = relevance_by_query.get(query_id, {})
         if not relevance:
-            continue
+            return None
         query_as_of = parse_dt(query_row.get("as_of_time"))
         if query_as_of is None:
-            continue
+            return None
         query_payload = _row_query_payload(query_row)
         query_profile = build_query_profile(
             objective=objective,
@@ -1002,8 +1004,22 @@ def _evaluate_baseline_ranker_objective(
             for item in ranked
             if str(item.get("candidate_id") or "")
         ]
-        if items:
-            query_payloads.append({"query_id": query_id, "items": items})
+        if not items:
+            return None
+        return {"query_id": query_id, "items": items}
+
+    query_payloads: List[Dict[str, Any]] = []
+    workers = max(1, min(int(parallel_workers), len(eval_queries)))
+    if workers > 1 and len(eval_queries) > 1:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            for payload in executor.map(_evaluate_query, eval_queries):
+                if payload is not None:
+                    query_payloads.append(payload)
+    else:
+        for query_row in eval_queries:
+            payload = _evaluate_query(query_row)
+            if payload is not None:
+                query_payloads.append(payload)
     return evaluate_ranking(query_payloads, k_values=(10, 20))
 
 
@@ -1349,6 +1365,7 @@ def train_recommender_from_datamart(
             relevance_by_query=relevance_by_query,
             retrieve_k=cfg.retrieve_k,
             max_age_days=cfg.max_age_days,
+            parallel_workers=cfg.retrieval_eval_parallel_workers,
         )
 
         ranker_output_dir = rankers_dir / effective_objective

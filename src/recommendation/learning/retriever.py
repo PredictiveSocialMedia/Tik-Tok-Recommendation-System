@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 import json
 import hashlib
 import logging
@@ -40,6 +41,7 @@ CREATOR_RETRIEVAL_VERSION = "creator_retrieval.v1"
 CREATOR_RETRIEVAL_MAX_BLEND_WEIGHT = 0.16
 CREATOR_RETRIEVAL_MIN_QUERY_GUARD = 0.20
 CREATOR_RETRIEVAL_MAX_MEMORY = 24
+QUERY_SCORE_CACHE_MAX_ENTRIES = 128
 DEFAULT_DENSE_MODEL_NAME = "sentence-transformers/paraphrase-MiniLM-L3-v2"
 
 
@@ -470,6 +472,7 @@ class HybridRetriever:
         self._multimodal_faiss: Any = None
         self._graph_faiss: Any = None
         self._trajectory_faiss: Any = None
+        self._query_score_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self.graph_bundle_id = str(self.graph_payload.get("graph_bundle_id") or "")
         self.graph_version = str(self.graph_payload.get("graph_version") or "")
         self.trajectory_manifest_id = str(
@@ -1091,6 +1094,67 @@ class HybridRetriever:
         q = vectorizer.transform([query_text])
         return cosine_similarity(q, matrix)[0].astype(np.float32)
 
+    def _query_score_cache_key(
+        self,
+        *,
+        query_row: Dict[str, Any],
+        query_text: str,
+        query_lexical_text: str,
+    ) -> str:
+        payload = {
+            "row_id": str(query_row.get("row_id") or ""),
+            "query_text": query_text,
+            "query_lexical_text": query_lexical_text,
+            "topic_key": str(query_row.get("topic_key") or ""),
+            "hashtags": list(query_row.get("hashtags") or []),
+            "keywords": list(query_row.get("keywords") or []),
+            "language": str(query_row.get("language") or ""),
+            "locale": str(query_row.get("locale") or ""),
+            "content_type": str(query_row.get("content_type") or ""),
+            "signal_hints": query_row.get("signal_hints") or {},
+            "features": query_row.get("features") or {},
+        }
+        encoded = json.dumps(payload, sort_keys=True, ensure_ascii=True, default=str).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _query_branch_scores(
+        self,
+        *,
+        query_row: Dict[str, Any],
+        query_text: str,
+        query_lexical_text: str,
+    ) -> Dict[str, Any]:
+        cache_key = self._query_score_cache_key(
+            query_row=query_row,
+            query_text=query_text,
+            query_lexical_text=query_lexical_text,
+        )
+        cached = self._query_score_cache.get(cache_key)
+        if cached is not None:
+            self._query_score_cache.move_to_end(cache_key)
+            return cached
+
+        lexical_scores = _normalize_scores(self._sparse_scores(query_lexical_text))
+        dense_scores = _normalize_scores(self._dense_scores(query_text))
+        multimodal_scores = _normalize_scores(self._multimodal_scores(query_row))
+        graph_scores_raw, graph_trace = self._graph_scores(query_row)
+        graph_scores = _normalize_scores(graph_scores_raw)
+        trajectory_scores_raw, trajectory_trace = self._trajectory_scores(query_row)
+        trajectory_scores = _normalize_scores(trajectory_scores_raw)
+        payload = {
+            "lexical_scores": lexical_scores,
+            "dense_scores": dense_scores,
+            "multimodal_scores": multimodal_scores,
+            "graph_scores": graph_scores,
+            "graph_trace": graph_trace,
+            "trajectory_scores": trajectory_scores,
+            "trajectory_trace": trajectory_trace,
+        }
+        self._query_score_cache[cache_key] = payload
+        if len(self._query_score_cache) > QUERY_SCORE_CACHE_MAX_ENTRIES:
+            self._query_score_cache.popitem(last=False)
+        return payload
+
     def _multimodal_scores(self, query_row: Dict[str, Any]) -> np.ndarray:
         embeddings = np.asarray(
             self.multimodal_payload.get("embeddings", np.zeros((len(self.row_ids), 4))),
@@ -1261,13 +1325,18 @@ class HybridRetriever:
         if index_cutoff is None:
             index_cutoff = query_as_of
 
-        lexical_scores = _normalize_scores(self._sparse_scores(query_lexical_text))
-        dense_scores = _normalize_scores(self._dense_scores(query_text))
-        multimodal_scores = _normalize_scores(self._multimodal_scores(query_row))
-        graph_scores_raw, graph_trace = self._graph_scores(query_row)
-        graph_scores = _normalize_scores(graph_scores_raw)
-        trajectory_scores_raw, trajectory_trace = self._trajectory_scores(query_row)
-        trajectory_scores = _normalize_scores(trajectory_scores_raw)
+        branch_scores = self._query_branch_scores(
+            query_row=query_row,
+            query_text=query_text,
+            query_lexical_text=query_lexical_text,
+        )
+        lexical_scores = branch_scores["lexical_scores"]
+        dense_scores = branch_scores["dense_scores"]
+        multimodal_scores = branch_scores["multimodal_scores"]
+        graph_scores = branch_scores["graph_scores"]
+        graph_trace = branch_scores["graph_trace"]
+        trajectory_scores = branch_scores["trajectory_scores"]
+        trajectory_trace = branch_scores["trajectory_trace"]
         weights = self._weights_for_objective(objective=objective, override=weight_override)
         fused = (
             (weights["lexical"] * lexical_scores)
