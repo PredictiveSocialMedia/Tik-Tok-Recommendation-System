@@ -6,7 +6,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
+
+import mlflow
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -15,6 +18,11 @@ if str(REPO_ROOT) not in sys.path:
 from src.recommendation.learning.artifacts import ArtifactRegistry
 
 
+def sanitize_metric_name(name: str) -> str:
+    return (
+        name.replace("@", "_at_")
+        .replace(" ", "_")
+    )
 def main() -> int:
     parser = argparse.ArgumentParser(description="Print recommender evaluation summary.")
     parser.add_argument(
@@ -32,7 +40,14 @@ def main() -> int:
         action="store_true",
         help="Include retriever ablation diagnostics when available.",
     )
+    parser.add_argument(
+        "--experiment-name",
+        default="recommender-evaluation",
+        help="MLflow experiment name.",
+    )
     args = parser.parse_args()
+
+    start_time = time.time()
 
     bundle_dir = args.bundle_dir
     if bundle_dir.is_file():
@@ -47,6 +62,66 @@ def main() -> int:
         if metrics_path.exists()
         else {}
     )
+
+    mlflow.set_experiment(args.experiment_name)
+
+    with mlflow.start_run(run_name=bundle_dir.name):
+        mlflow.log_param("bundle_dir", str(bundle_dir))
+        mlflow.log_param("metrics_path", str(metrics_path))
+        mlflow.log_param("show_manifest", args.show_manifest)
+        mlflow.log_param("show_ablation", args.show_ablation)
+
+        if isinstance(manifest, dict):
+            for key in [
+                "dataset_version",
+                "retrieval_approach",
+                "embedding_model",
+                "top_k",
+                "graph_version",
+                "trajectory_version",
+            ]:
+                value = manifest.get(key)
+                if value is not None:
+                    mlflow.log_param(key, value)
+
+        if isinstance(metrics, dict):
+            for objective, payload in metrics.items():
+                if not isinstance(payload, dict):
+                    continue
+
+                spec = payload.get("spec", {})
+                if isinstance(spec, dict):
+                    for key in [
+                        "objective_id",
+                        "label_key",
+                        "primary_metric",
+                        "training_loss",
+                        "calibration",
+                    ]:
+                        value = spec.get(key)
+                        if value is not None:
+                            mlflow.log_param(f"{objective}.{key}", value)
+
+                retriever_metrics = payload.get("retriever", {})
+                if isinstance(retriever_metrics, dict):
+                    for metric_name, metric_value in retriever_metrics.items():
+                        if isinstance(metric_value, (int, float)):
+                            safe_name = sanitize_metric_name(
+                                f"{objective}.retriever.{metric_name}"
+                            )
+                            mlflow.log_metric(safe_name, metric_value)
+
+                ranker_metrics = payload.get("ranker", {})
+                if isinstance(ranker_metrics, dict):
+                    for metric_name, metric_value in ranker_metrics.items():
+                        if isinstance(metric_value, (int, float)):
+                            safe_name = sanitize_metric_name(
+                                f"{objective}.ranker.{metric_name}"
+                            )
+                            mlflow.log_metric(safe_name, metric_value)
+
+        runtime_seconds = time.time() - start_time
+        mlflow.log_metric("runtime_seconds", runtime_seconds)
 
     output = {"bundle_dir": str(bundle_dir), "metrics": metrics}
     if args.show_manifest:
