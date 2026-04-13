@@ -296,18 +296,31 @@ def test_train_recommender_fast_profile_skips_ablation_and_uses_validation_eval(
         (bundle_dir / "metrics" / "objective_metrics.json").read_text(encoding="utf-8")
     )
     assert manifest["phase1_profile"] == "artifact_fast"
+    assert manifest["fast_primary_objective"] == "engagement"
     for objective in ("reach", "engagement", "conversion"):
         ablation_meta = manifest["objective_ablation_reports"][objective]
         ablation_payload = json.loads(
             (bundle_dir / str(ablation_meta["path"])).read_text(encoding="utf-8")
         )
         assert ablation_payload["phase1_profile"] == "artifact_fast"
-        assert ablation_payload["retriever_ablation"]["skipped"] is True
-        assert (
-            ablation_payload["retriever_ablation"]["reason"]
-            == "artifact_fast_profile"
-        )
         assert objective_metrics[objective]["phase1_profile"] == "artifact_fast"
+        if objective == "engagement":
+            assert ablation_payload["retriever_ablation"]["skipped"] is True
+            assert (
+                ablation_payload["retriever_ablation"]["reason"]
+                == "artifact_fast_profile"
+            )
+            assert objective_metrics[objective]["is_fast_primary_objective"] is True
+            assert objective_metrics[objective]["retriever"].get("skipped") is not True
+        else:
+            assert ablation_payload["retriever_ablation"]["skipped"] is True
+            assert (
+                ablation_payload["retriever_ablation"]["reason"]
+                == "artifact_fast_secondary_objective"
+            )
+            assert objective_metrics[objective]["is_fast_primary_objective"] is False
+            assert objective_metrics[objective]["retriever"]["skipped"] is True
+            assert objective_metrics[objective]["ranker"]["skipped"] is True
 
 
 def test_artifact_registry_compatibility_check(tmp_path: Path):

@@ -153,6 +153,7 @@ class RecommenderTrainingConfig:
     retrieval_eval_parallel_workers: int = 1
     blend_search_parallel_workers: int = 1
     phase1_profile: str = "full"
+    fast_primary_objective: str = "engagement"
 
     def __post_init__(self) -> None:
         if self.pair_target_source not in VALID_PAIR_TARGET_SOURCES:
@@ -183,6 +184,11 @@ class RecommenderTrainingConfig:
         if self.phase1_profile not in VALID_PHASE1_PROFILES:
             raise ValueError(
                 f"phase1_profile must be one of {sorted(VALID_PHASE1_PROFILES)}."
+            )
+        _, effective_fast_primary = map_objective(self.fast_primary_objective)
+        if effective_fast_primary not in {map_objective(obj)[1] for obj in self.objectives}:
+            raise ValueError(
+                "fast_primary_objective must resolve to one of the configured objectives."
             )
 
 
@@ -1043,6 +1049,52 @@ def _skipped_retriever_ablation(reason: str) -> Dict[str, Any]:
     }
 
 
+def _skipped_retrieval_eval(reason: str) -> Dict[str, Any]:
+    return {
+        "recall@50": 0.0,
+        "recall@100": 0.0,
+        "recall@200": 0.0,
+        "skipped": True,
+        "reason": str(reason),
+    }
+
+
+def _skipped_ranker_eval(reason: str) -> Dict[str, Any]:
+    return {
+        "ndcg@10": 0.0,
+        "mrr@10": 0.0,
+        "ndcg@20": 0.0,
+        "mrr@20": 0.0,
+        "skipped": True,
+        "reason": str(reason),
+    }
+
+
+def _lightweight_retriever_weight_gate(
+    *,
+    selected_weights: Dict[str, float],
+    primary_objective: str,
+) -> Dict[str, Any]:
+    return {
+        "metric_key": "recall@100",
+        "selected_variant": "fast_primary_objective_reuse",
+        "selected_weights": _normalize_retrieval_weights(selected_weights),
+        "validation": {
+            "learned": None,
+            "sparse_baseline": None,
+            "selected_not_worse_than_competitor": None,
+        },
+        "test": {
+            "learned": None,
+            "sparse_baseline": None,
+            "selected_not_worse_than_competitor": None,
+        },
+        "skipped": True,
+        "reason": "artifact_fast_secondary_objective",
+        "primary_objective": str(primary_objective),
+    }
+
+
 def train_recommender_from_datamart(
     datamart: Dict[str, Any],
     artifact_root: Path,
@@ -1050,6 +1102,7 @@ def train_recommender_from_datamart(
 ) -> Dict[str, Any]:
     cfg = config or RecommenderTrainingConfig()
     fast_phase1 = cfg.phase1_profile == "artifact_fast"
+    _, fast_primary_objective = map_objective(cfg.fast_primary_objective)
     rows = list(datamart.get("rows") or [])
     pair_rows = list(datamart.get("pair_rows") or [])
     if not rows:
@@ -1273,8 +1326,15 @@ def train_recommender_from_datamart(
     learned_objective_blend: Dict[str, Dict[str, float]] = {}
     rows_by_id = {str(row.get("row_id") or ""): row for row in rows}
 
-    for objective in cfg.objectives:
-        _, effective_objective = map_objective(objective)
+    requested_objectives = [map_objective(objective)[1] for objective in cfg.objectives]
+    ordered_objectives: List[str] = []
+    if fast_phase1 and fast_primary_objective in requested_objectives:
+        ordered_objectives.append(fast_primary_objective)
+    for objective in requested_objectives:
+        if objective not in ordered_objectives:
+            ordered_objectives.append(objective)
+
+    for effective_objective in ordered_objectives:
         if effective_objective in trained_objectives:
             continue
 
@@ -1287,51 +1347,47 @@ def train_recommender_from_datamart(
             pair_rows=objective_pair_rows,
             objective=effective_objective,
         )
-        logger.info(
-            "Phase 1 objective %s: blend search starting (pair_rows=%d, labeled_queries=%d)",
-            effective_objective,
-            len(objective_pair_rows),
-            len(relevance_by_query),
-        )
-        learned_weights = _learn_objective_blend_weights(
-            retriever=retriever,
-            objective=effective_objective,
-            rows_split=rows_split,
-            relevance_by_query=relevance_by_query,
-            retrieve_k=cfg.retrieve_k,
-            max_age_days=cfg.max_age_days,
-            blend_grid_levels=cfg.blend_grid_levels,
-            blend_search_max_eval_queries=cfg.blend_search_max_eval_queries,
-            random_seed=cfg.random_seed,
-            parallel_workers=cfg.blend_search_parallel_workers,
-        )
-        sparse_baseline_weights = _sparse_only_retrieval_weights()
-        learned_validation_eval = _evaluate_retriever_objective(
-            retriever=retriever,
-            objective=effective_objective,
-            rows_split=rows_split,
-            relevance_by_query=relevance_by_query,
-            retrieve_k=cfg.retrieve_k,
-            max_age_days=cfg.max_age_days,
-            weight_override=learned_weights,
-            eval_split="validation",
-            parallel_workers=cfg.retrieval_eval_parallel_workers,
-        )
-        sparse_validation_eval = _evaluate_retriever_objective(
-            retriever=retriever,
-            objective=effective_objective,
-            rows_split=rows_split,
-            relevance_by_query=relevance_by_query,
-            retrieve_k=cfg.retrieve_k,
-            max_age_days=cfg.max_age_days,
-            weight_override=sparse_baseline_weights,
-            eval_split="validation",
-            parallel_workers=cfg.retrieval_eval_parallel_workers,
-        )
-        learned_test_eval = None
-        sparse_test_eval = None
-        if not fast_phase1:
-            learned_test_eval = _evaluate_retriever_objective(
+        fast_lightweight_objective = fast_phase1 and effective_objective != fast_primary_objective
+        if fast_lightweight_objective:
+            logger.info(
+                "Phase 1 objective %s: artifact_fast secondary path (primary=%s, pair_rows=%d, labeled_queries=%d)",
+                effective_objective,
+                fast_primary_objective,
+                len(objective_pair_rows),
+                len(relevance_by_query),
+            )
+            selected_retriever_weights = dict(
+                learned_objective_blend.get(fast_primary_objective)
+                or retriever.branch_weights(fast_primary_objective)
+            )
+            retriever_weight_gate = _lightweight_retriever_weight_gate(
+                selected_weights=selected_retriever_weights,
+                primary_objective=fast_primary_objective,
+            )
+            retrieval_eval = _skipped_retrieval_eval("artifact_fast_secondary_objective")
+            retriever_ablation = _skipped_retriever_ablation("artifact_fast_secondary_objective")
+            ranker_eval = _skipped_ranker_eval("artifact_fast_secondary_objective")
+        else:
+            logger.info(
+                "Phase 1 objective %s: blend search starting (pair_rows=%d, labeled_queries=%d)",
+                effective_objective,
+                len(objective_pair_rows),
+                len(relevance_by_query),
+            )
+            learned_weights = _learn_objective_blend_weights(
+                retriever=retriever,
+                objective=effective_objective,
+                rows_split=rows_split,
+                relevance_by_query=relevance_by_query,
+                retrieve_k=cfg.retrieve_k,
+                max_age_days=cfg.max_age_days,
+                blend_grid_levels=cfg.blend_grid_levels,
+                blend_search_max_eval_queries=cfg.blend_search_max_eval_queries,
+                random_seed=cfg.random_seed,
+                parallel_workers=cfg.blend_search_parallel_workers,
+            )
+            sparse_baseline_weights = _sparse_only_retrieval_weights()
+            learned_validation_eval = _evaluate_retriever_objective(
                 retriever=retriever,
                 objective=effective_objective,
                 rows_split=rows_split,
@@ -1339,10 +1395,10 @@ def train_recommender_from_datamart(
                 retrieve_k=cfg.retrieve_k,
                 max_age_days=cfg.max_age_days,
                 weight_override=learned_weights,
-                eval_split="test",
+                eval_split="validation",
                 parallel_workers=cfg.retrieval_eval_parallel_workers,
             )
-            sparse_test_eval = _evaluate_retriever_objective(
+            sparse_validation_eval = _evaluate_retriever_objective(
                 retriever=retriever,
                 objective=effective_objective,
                 rows_split=rows_split,
@@ -1350,48 +1406,73 @@ def train_recommender_from_datamart(
                 retrieve_k=cfg.retrieve_k,
                 max_age_days=cfg.max_age_days,
                 weight_override=sparse_baseline_weights,
-                eval_split="test",
+                eval_split="validation",
                 parallel_workers=cfg.retrieval_eval_parallel_workers,
             )
-        retriever_weight_gate = _select_retriever_weight_variant(
-            learned_weights=learned_weights,
-            learned_validation=learned_validation_eval,
-            sparse_baseline_weights=sparse_baseline_weights,
-            sparse_validation=sparse_validation_eval,
-            learned_test=learned_test_eval,
-            sparse_test=sparse_test_eval,
-        )
-        selected_retriever_weights = dict(retriever_weight_gate["selected_weights"])
-        learned_objective_blend[effective_objective] = selected_retriever_weights
-        retriever.set_objective_blend({effective_objective: selected_retriever_weights})
-
-        selected_variant = str(retriever_weight_gate.get("selected_variant") or "learned")
-        if selected_variant == "sparse_baseline":
-            retrieval_eval = dict(sparse_validation_eval)
-        else:
-            retrieval_eval = dict(learned_validation_eval)
-        retriever_ablation = (
-            _skipped_retriever_ablation("artifact_fast_profile")
-            if fast_phase1
-            else _evaluate_retriever_ablation_objective(
-                retriever=retriever,
+            learned_test_eval = None
+            sparse_test_eval = None
+            if not fast_phase1:
+                learned_test_eval = _evaluate_retriever_objective(
+                    retriever=retriever,
+                    objective=effective_objective,
+                    rows_split=rows_split,
+                    relevance_by_query=relevance_by_query,
+                    retrieve_k=cfg.retrieve_k,
+                    max_age_days=cfg.max_age_days,
+                    weight_override=learned_weights,
+                    eval_split="test",
+                    parallel_workers=cfg.retrieval_eval_parallel_workers,
+                )
+                sparse_test_eval = _evaluate_retriever_objective(
+                    retriever=retriever,
+                    objective=effective_objective,
+                    rows_split=rows_split,
+                    relevance_by_query=relevance_by_query,
+                    retrieve_k=cfg.retrieve_k,
+                    max_age_days=cfg.max_age_days,
+                    weight_override=sparse_baseline_weights,
+                    eval_split="test",
+                    parallel_workers=cfg.retrieval_eval_parallel_workers,
+                )
+            retriever_weight_gate = _select_retriever_weight_variant(
+                learned_weights=learned_weights,
+                learned_validation=learned_validation_eval,
+                sparse_baseline_weights=sparse_baseline_weights,
+                sparse_validation=sparse_validation_eval,
+                learned_test=learned_test_eval,
+                sparse_test=sparse_test_eval,
+            )
+            selected_retriever_weights = dict(retriever_weight_gate["selected_weights"])
+            selected_variant = str(retriever_weight_gate.get("selected_variant") or "learned")
+            if selected_variant == "sparse_baseline":
+                retrieval_eval = dict(sparse_validation_eval)
+            else:
+                retrieval_eval = dict(learned_validation_eval)
+            retriever_ablation = (
+                _skipped_retriever_ablation("artifact_fast_profile")
+                if fast_phase1
+                else _evaluate_retriever_ablation_objective(
+                    retriever=retriever,
+                    objective=effective_objective,
+                    rows_split=rows_split,
+                    relevance_by_query=relevance_by_query,
+                    retrieve_k=cfg.retrieve_k,
+                    max_age_days=cfg.max_age_days,
+                    parallel_workers=cfg.retrieval_eval_parallel_workers,
+                )
+            )
+            ranker_eval = _evaluate_baseline_ranker_objective(
                 objective=effective_objective,
                 rows_split=rows_split,
                 relevance_by_query=relevance_by_query,
                 retrieve_k=cfg.retrieve_k,
                 max_age_days=cfg.max_age_days,
                 parallel_workers=cfg.retrieval_eval_parallel_workers,
+                eval_split="validation" if fast_phase1 else None,
             )
-        )
-        ranker_eval = _evaluate_baseline_ranker_objective(
-            objective=effective_objective,
-            rows_split=rows_split,
-            relevance_by_query=relevance_by_query,
-            retrieve_k=cfg.retrieve_k,
-            max_age_days=cfg.max_age_days,
-            parallel_workers=cfg.retrieval_eval_parallel_workers,
-            eval_split="validation" if fast_phase1 else None,
-        )
+
+        learned_objective_blend[effective_objective] = selected_retriever_weights
+        retriever.set_objective_blend({effective_objective: selected_retriever_weights})
 
         ranker_output_dir = rankers_dir / effective_objective
         ranker_output_dir.mkdir(parents=True, exist_ok=True)
@@ -1440,6 +1521,7 @@ def train_recommender_from_datamart(
             "pair_row_count": len(objective_pair_rows),
             "pair_target_source": cfg.pair_target_source,
             "phase1_profile": cfg.phase1_profile,
+            "is_fast_primary_objective": effective_objective == fast_primary_objective,
         }
         diagnostics_rel_path = f"diagnostics/objective_{effective_objective}_baseline.json"
         diagnostics_path = bundle_dir / diagnostics_rel_path
@@ -1459,6 +1541,7 @@ def train_recommender_from_datamart(
             "retriever_eval": retrieval_eval,
             "ranker_eval": ranker_eval,
             "phase1_profile": cfg.phase1_profile,
+            "is_fast_primary_objective": effective_objective == fast_primary_objective,
         }
         ablation_text = json.dumps(ablation_payload, ensure_ascii=False, indent=2)
         (bundle_dir / ablation_rel_path).write_text(ablation_text, encoding="utf-8")
@@ -1484,6 +1567,7 @@ def train_recommender_from_datamart(
             "retriever_weight_gate": retriever_weight_gate,
             "retriever_ablation": retriever_ablation,
             "phase1_profile": cfg.phase1_profile,
+            "is_fast_primary_objective": effective_objective == fast_primary_objective,
         }
         trained_objectives.append(effective_objective)
 
@@ -1544,6 +1628,7 @@ def train_recommender_from_datamart(
         "random_seed": cfg.random_seed,
         "pair_target_source": cfg.pair_target_source,
         "phase1_profile": cfg.phase1_profile,
+        "fast_primary_objective": fast_primary_objective if fast_phase1 else None,
         "policy_reranker": PolicyRerankerConfig().to_payload(),
         "objective_diagnostics": objective_diagnostics_manifest,
         "objective_ablation_reports": objective_ablation_manifest,
