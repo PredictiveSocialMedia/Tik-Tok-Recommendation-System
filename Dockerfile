@@ -77,9 +77,9 @@ from keybert import KeyBERT; \
 KeyBERT('paraphrase-multilingual-MiniLM-L12-v2'); \
 print('OFFLINE OK: KeyBERT')"
 
-# Copy source code and ensure package is importable
+# Copy source code and ensure all packages are importable
 COPY src/ ./src/
-RUN touch ./src/__init__.py
+RUN find ./src -type d -exec sh -c 'test -f "$1/__init__.py" || touch "$1/__init__.py"' _ {} \;
 
 # Copy serve script
 COPY scripts/serve_recommender.py ./scripts/serve_recommender.py
