@@ -12,6 +12,7 @@
     "test:modeling": "node --import tsx --test server/corpus/loadCandidateCorpus.test.ts server/recommender/client.test.ts server/recommender/routing.test.ts server/recommender/resilience.test.ts server/recommender/fallbackBundle.test.ts server/recommender/experimentation.test.ts server/recommender/requestId.test.ts server/recommender/fallbackReason.test.ts server/feedback/store.test.ts server/labeling/store.test.ts server/validation/parseGenerateReportRequest.test.ts server/validation/parseRecommendationsRequest.test.ts server/validation/parseReportFeedbackRequest.test.ts server/validation/validateReportOutput.test.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.103.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",

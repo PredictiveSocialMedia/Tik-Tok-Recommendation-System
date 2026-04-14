@@ -2067,10 +2067,18 @@ app.post("/recommendations", async (request, response) => {
       return;
     }
     const creatorId = extractCreatorId(seedRecord);
+    const rawBody = request.body as Record<string, unknown>;
+    const reqUserId =
+      typeof rawBody.user_id === "string" && rawBody.user_id.trim()
+        ? rawBody.user_id.trim()
+        : typeof request.headers["x-user-id"] === "string" && request.headers["x-user-id"].trim()
+          ? request.headers["x-user-id"].trim()
+          : undefined;
     const userContext = isUploadedQuery
       ? undefined
       : await feedbackGateway.getCreatorContext({
-          creatorId,
+          creatorId: creatorId ?? reqUserId,
+          userId: reqUserId,
           objective: body.objective,
           mapObjective: mapObjectiveForRecommender
         });
@@ -2453,10 +2461,18 @@ app.post("/generate-report", async (request, response) => {
       return;
     }
     const creatorId = extractCreatorId(seed);
+    const reportRawBody = request.body as Record<string, unknown>;
+    const reportUserId =
+      typeof reportRawBody.user_id === "string" && reportRawBody.user_id.trim()
+        ? reportRawBody.user_id.trim()
+        : typeof request.headers["x-user-id"] === "string" && request.headers["x-user-id"].trim()
+          ? request.headers["x-user-id"].trim()
+          : undefined;
     const userContext = isUploadedQuery
       ? undefined
       : await feedbackGateway.getCreatorContext({
-          creatorId,
+          creatorId: creatorId ?? reportUserId,
+          userId: reportUserId,
           objective: body.objective,
           mapObjective: mapObjectiveForRecommender
         });
@@ -2897,7 +2913,8 @@ app.post("/report-feedback", async (request, response) => {
     signalStrength: parsed.value.signal_strength,
     labelDirection: parsed.value.label_direction,
     metadata: parsed.value.metadata,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    userId: parsed.value.user_id ?? null
   });
   response.status(202).json(result);
 });
