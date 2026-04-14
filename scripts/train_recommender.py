@@ -6,7 +6,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
+
+import mlflow
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -40,6 +43,12 @@ def main() -> int:
         type=str,
         default="recommender-v1",
         help="Run name suffix for artifact bundle folder.",
+    )
+    parser.add_argument(
+        "--experiment-name",
+        type=str,
+        default="recommender-training",
+        help="MLflow experiment name.",
     )
     parser.add_argument(
         "--retrieve-k",
@@ -157,46 +166,92 @@ def main() -> int:
         help="Optional trajectory artifact manifest path/dir.",
     )
     args = parser.parse_args()
+    start_time = time.time()
 
     with open(args.datamart_json, "r", encoding="utf-8") as f:
         datamart = json.load(f)
     objectives = [item.strip() for item in args.objectives.split(",") if item.strip()]
-    result = train_recommender_from_datamart(
-        datamart=datamart,
-        artifact_root=args.artifact_root,
-        config=RecommenderTrainingConfig(
-            objectives=objectives,
-            retrieve_k=max(1, args.retrieve_k),
-            max_age_days=max(1, args.max_age_days),
-            dense_model_name=args.dense_model_name,
-            run_name=args.run_name,
-            pair_target_source=args.pair_target_source,
-            feature_snapshot_manifest_path=args.feature_snapshot_manifest_path,
-            graph_enabled=bool(args.graph_enabled),
-            graph_embedding_dim=max(4, int(args.graph_embedding_dim)),
-            graph_walk_params={
-                "walk_length": max(4, int(args.graph_walk_length)),
-                "num_walks": max(2, int(args.graph_num_walks)),
-                "context_size": max(1, int(args.graph_context_size)),
-                "seed": 13,
-            },
-            graph_weighting_params={
-                "recency_half_life_days": 45.0,
-                "include_creator_similarity": True,
-                "creator_similarity_top_k": 5,
-                "creator_similarity_min_jaccard": 0.15,
-                "branch_weight": max(0.0, float(args.graph_branch_weight)),
-            },
-            trajectory_enabled=bool(args.trajectory_enabled),
-            trajectory_embedding_dim=max(4, int(args.trajectory_embedding_dim)),
-            trajectory_feature_version=str(args.trajectory_feature_version),
-            trajectory_branch_weight=max(0.0, float(args.trajectory_branch_weight)),
-            trajectory_encoder_mode=str(args.trajectory_encoder_mode),
-            trajectory_manifest_path=args.trajectory_manifest_path,
-            contract_version=str(datamart.get("source_contract_version", "contract.v2")),
-            datamart_version=str(datamart.get("version", "datamart.v1")),
-        ),
-    )
+    mlflow.set_experiment(args.experiment_name)
+    with mlflow.start_run(run_name=args.run_name):
+        mlflow.log_param("datamart_json", str(args.datamart_json))
+        mlflow.log_param("artifact_root", str(args.artifact_root))
+        mlflow.log_param("run_name", args.run_name)
+        mlflow.log_param("objectives", ",".join(objectives))
+        mlflow.log_param("retrieve_k", max(1, args.retrieve_k))
+        mlflow.log_param("max_age_days", max(1, args.max_age_days))
+        mlflow.log_param("dense_model_name", args.dense_model_name)
+        mlflow.log_param("pair_target_source", args.pair_target_source)
+        mlflow.log_param(
+            "feature_snapshot_manifest_path",
+            str(args.feature_snapshot_manifest_path) if args.feature_snapshot_manifest_path else "None",
+        )
+        mlflow.log_param("graph_enabled", bool(args.graph_enabled))
+        mlflow.log_param("graph_embedding_dim", max(4, int(args.graph_embedding_dim)))
+        mlflow.log_param("graph_walk_length", max(4, int(args.graph_walk_length)))
+        mlflow.log_param("graph_num_walks", max(2, int(args.graph_num_walks)))
+        mlflow.log_param("graph_context_size", max(1, int(args.graph_context_size)))
+        mlflow.log_param("graph_branch_weight", max(0.0, float(args.graph_branch_weight)))
+        mlflow.log_param("trajectory_enabled", bool(args.trajectory_enabled))
+        mlflow.log_param("trajectory_embedding_dim", max(4, int(args.trajectory_embedding_dim)))
+        mlflow.log_param("trajectory_feature_version", str(args.trajectory_feature_version))
+        mlflow.log_param("trajectory_branch_weight", max(0.0, float(args.trajectory_branch_weight)))
+        mlflow.log_param("trajectory_encoder_mode", str(args.trajectory_encoder_mode))
+        mlflow.log_param(
+            "trajectory_manifest_path",
+            str(args.trajectory_manifest_path) if args.trajectory_manifest_path else "None",
+        )
+        mlflow.log_param(
+            "contract_version",
+            str(datamart.get("source_contract_version", "contract.v2")),
+        )
+        mlflow.log_param(
+            "datamart_version",
+            str(datamart.get("version", "datamart.v1")),
+        )
+
+        result = train_recommender_from_datamart(
+            datamart=datamart,
+            artifact_root=args.artifact_root,
+            config=RecommenderTrainingConfig(
+                objectives=objectives,
+                retrieve_k=max(1, args.retrieve_k),
+                max_age_days=max(1, args.max_age_days),
+                dense_model_name=args.dense_model_name,
+                run_name=args.run_name,
+                pair_target_source=args.pair_target_source,
+                feature_snapshot_manifest_path=args.feature_snapshot_manifest_path,
+                graph_enabled=bool(args.graph_enabled),
+                graph_embedding_dim=max(4, int(args.graph_embedding_dim)),
+                graph_walk_params={
+                    "walk_length": max(4, int(args.graph_walk_length)),
+                    "num_walks": max(2, int(args.graph_num_walks)),
+                    "context_size": max(1, int(args.graph_context_size)),
+                    "seed": 13,
+                },
+                graph_weighting_params={
+                    "recency_half_life_days": 45.0,
+                    "include_creator_similarity": True,
+                    "creator_similarity_top_k": 5,
+                    "creator_similarity_min_jaccard": 0.15,
+                    "branch_weight": max(0.0, float(args.graph_branch_weight)),
+                },
+                trajectory_enabled=bool(args.trajectory_enabled),
+                trajectory_embedding_dim=max(4, int(args.trajectory_embedding_dim)),
+                trajectory_feature_version=str(args.trajectory_feature_version),
+                trajectory_branch_weight=max(0.0, float(args.trajectory_branch_weight)),
+                trajectory_encoder_mode=str(args.trajectory_encoder_mode),
+                trajectory_manifest_path=args.trajectory_manifest_path,
+                contract_version=str(datamart.get("source_contract_version", "contract.v2")),
+                datamart_version=str(datamart.get("version", "datamart.v1")),
+            ),
+        )
+
+        runtime_seconds = time.time() - start_time
+        mlflow.log_metric("runtime_seconds", runtime_seconds)
+
+        bundle_dir = Path(result["bundle_dir"])
+        mlflow.log_param("bundle_dir", str(bundle_dir))
+        mlflow.log_param("bundle_name", bundle_dir.name)
     bundle_dir = Path(result["bundle_dir"])
     latest_link = args.artifact_root / "latest"
     if latest_link.exists() or latest_link.is_symlink():
