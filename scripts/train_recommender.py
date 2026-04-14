@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 import mlflow
+from mlflow.tracking import MlflowClient
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -51,6 +52,25 @@ def main() -> int:
         default="recommender-training",
         help="MLflow experiment name.",
     )
+    parser.add_argument(
+        "--registered-model-name",
+        type=str,
+        default="tiktok-recommender",
+        help="MLflow registered model name.",
+    )
+    parser.add_argument(
+        "--register-model",
+        dest="register_model",
+        action="store_true",
+        help="Register the trained output in MLflow Model Registry.",
+    )
+    parser.add_argument(
+        "--no-register-model",
+        dest="register_model",
+        action="store_false",
+        help="Disable MLflow model registration.",
+    )
+    parser.set_defaults(register_model=True)
     parser.add_argument(
         "--retrieve-k",
         type=int,
@@ -253,6 +273,8 @@ def main() -> int:
         bundle_dir = Path(result["bundle_dir"])
         mlflow.log_param("bundle_dir", str(bundle_dir))
         mlflow.log_param("bundle_name", bundle_dir.name)
+        if bundle_dir.exists():
+            mlflow.log_artifacts(str(bundle_dir), artifact_path="bundle")
 
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -264,6 +286,8 @@ def main() -> int:
             tmp_path = tmp_file.name
 
         mlflow.log_artifact(tmp_path, artifact_path="training")
+
+
     bundle_dir = Path(result["bundle_dir"])
     latest_link = args.artifact_root / "latest"
     if latest_link.exists() or latest_link.is_symlink():
