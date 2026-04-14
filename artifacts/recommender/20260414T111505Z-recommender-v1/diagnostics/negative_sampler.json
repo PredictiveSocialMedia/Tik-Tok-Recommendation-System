@@ -1,0 +1,15 @@
+{
+  "query_row_id": "v012::2025-10-06T16:45:00+00:00",
+  "pool_size": 35,
+  "sample_positive_count": 3,
+  "sample_negative_count": 12,
+  "policy": {
+    "negatives_per_positive": 4,
+    "hard_ratio": 0.5,
+    "semihard_ratio": 0.3,
+    "easy_ratio": 0.2,
+    "max_per_author": 2,
+    "max_per_topic": 4,
+    "seed": 13
+  }
+}

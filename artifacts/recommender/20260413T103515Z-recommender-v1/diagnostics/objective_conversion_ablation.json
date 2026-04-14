@@ -1,0 +1,323 @@
+{
+  "objective": "conversion",
+  "retriever_weight_gate": {
+    "metric_key": "recall@100",
+    "selected_variant": "learned",
+    "selected_weights": {
+      "lexical": 0.0,
+      "dense_text": 0.0,
+      "multimodal": 0.0,
+      "graph_dense": 1.0,
+      "trajectory_dense": 0.0
+    },
+    "validation": {
+      "learned": {
+        "recall@50": 0.0,
+        "recall@100": 0.0,
+        "recall@200": 0.0
+      },
+      "sparse_baseline": {
+        "recall@50": 0.0,
+        "recall@100": 0.0,
+        "recall@200": 0.0
+      },
+      "selected_not_worse_than_competitor": true
+    },
+    "test": {
+      "learned": {
+        "recall@50": 0.0,
+        "recall@100": 0.0,
+        "recall@200": 0.0
+      },
+      "sparse_baseline": {
+        "recall@50": 0.0,
+        "recall@100": 0.0,
+        "recall@200": 0.0
+      },
+      "selected_not_worse_than_competitor": true
+    }
+  },
+  "retriever_ablation": {
+    "metric_key": "recall@100",
+    "variants": {
+      "full": {
+        "dropped_branches": [],
+        "weights": {
+          "lexical": 0.0,
+          "dense_text": 0.0,
+          "multimodal": 0.0,
+          "graph_dense": 1.0,
+          "trajectory_dense": 0.0
+        },
+        "metrics": {
+          "recall@50": 0.0,
+          "recall@100": 0.0,
+          "recall@200": 0.0
+        },
+        "delta_vs_full": {
+          "recall@50": {
+            "baseline": 0.0,
+            "variant": 0.0,
+            "delta": 0.0,
+            "delta_pp": 0.0,
+            "relative_delta_pct": 0.0
+          },
+          "recall@100": {
+            "baseline": 0.0,
+            "variant": 0.0,
+            "delta": 0.0,
+            "delta_pp": 0.0,
+            "relative_delta_pct": 0.0
+          },
+          "recall@200": {
+            "baseline": 0.0,
+            "variant": 0.0,
+            "delta": 0.0,
+            "delta_pp": 0.0,
+            "relative_delta_pct": 0.0
+          }
+        }
+      },
+      "no_lexical": {
+        "dropped_branches": [
+          "lexical"
+        ],
+        "weights": {
+          "lexical": 0.0,
+          "dense_text": 0.0,
+          "multimodal": 0.0,
+          "graph_dense": 1.0,
+          "trajectory_dense": 0.0
+        },
+        "metrics": {
+          "recall@50": 0.0,
+          "recall@100": 0.0,
+          "recall@200": 0.0
+        },
+        "delta_vs_full": {
+          "recall@50": {
+            "baseline": 0.0,
+            "variant": 0.0,
+            "delta": 0.0,
+            "delta_pp": 0.0,
+            "relative_delta_pct": 0.0
+          },
+          "recall@100": {
+            "baseline": 0.0,
+            "variant": 0.0,
+            "delta": 0.0,
+            "delta_pp": 0.0,
+            "relative_delta_pct": 0.0
+          },
+          "recall@200": {
+            "baseline": 0.0,
+            "variant": 0.0,
+            "delta": 0.0,
+            "delta_pp": 0.0,
+            "relative_delta_pct": 0.0
+          }
+        }
+      },
+      "no_dense_text": {
+        "dropped_branches": [
+          "dense_text"
+        ],
+        "weights": {
+          "lexical": 0.0,
+          "dense_text": 0.0,
+          "multimodal": 0.0,
+          "graph_dense": 1.0,
+          "trajectory_dense": 0.0
+        },
+        "metrics": {
+          "recall@50": 0.0,
+          "recall@100": 0.0,
+          "recall@200": 0.0
+        },
+        "delta_vs_full": {
+          "recall@50": {
+            "baseline": 0.0,
+            "variant": 0.0,
+            "delta": 0.0,
+            "delta_pp": 0.0,
+            "relative_delta_pct": 0.0
+          },
+          "recall@100": {
+            "baseline": 0.0,
+            "variant": 0.0,
+            "delta": 0.0,
+            "delta_pp": 0.0,
+            "relative_delta_pct": 0.0
+          },
+          "recall@200": {
+            "baseline": 0.0,
+            "variant": 0.0,
+            "delta": 0.0,
+            "delta_pp": 0.0,
+            "relative_delta_pct": 0.0
+          }
+        }
+      },
+      "no_multimodal": {
+        "dropped_branches": [
+          "multimodal"
+        ],
+        "weights": {
+          "lexical": 0.0,
+          "dense_text": 0.0,
+          "multimodal": 0.0,
+          "graph_dense": 1.0,
+          "trajectory_dense": 0.0
+        },
+        "metrics": {
+          "recall@50": 0.0,
+          "recall@100": 0.0,
+          "recall@200": 0.0
+        },
+        "delta_vs_full": {
+          "recall@50": {
+            "baseline": 0.0,
+            "variant": 0.0,
+            "delta": 0.0,
+            "delta_pp": 0.0,
+            "relative_delta_pct": 0.0
+          },
+          "recall@100": {
+            "baseline": 0.0,
+            "variant": 0.0,
+            "delta": 0.0,
+            "delta_pp": 0.0,
+            "relative_delta_pct": 0.0
+          },
+          "recall@200": {
+            "baseline": 0.0,
+            "variant": 0.0,
+            "delta": 0.0,
+            "delta_pp": 0.0,
+            "relative_delta_pct": 0.0
+          }
+        }
+      },
+      "no_graph_dense": {
+        "dropped_branches": [
+          "graph_dense"
+        ],
+        "weights": {
+          "lexical": 0.25,
+          "dense_text": 0.25,
+          "multimodal": 0.25,
+          "graph_dense": 0.0,
+          "trajectory_dense": 0.25
+        },
+        "metrics": {
+          "recall@50": 0.0,
+          "recall@100": 0.0,
+          "recall@200": 0.0
+        },
+        "delta_vs_full": {
+          "recall@50": {
+            "baseline": 0.0,
+            "variant": 0.0,
+            "delta": 0.0,
+            "delta_pp": 0.0,
+            "relative_delta_pct": 0.0
+          },
+          "recall@100": {
+            "baseline": 0.0,
+            "variant": 0.0,
+            "delta": 0.0,
+            "delta_pp": 0.0,
+            "relative_delta_pct": 0.0
+          },
+          "recall@200": {
+            "baseline": 0.0,
+            "variant": 0.0,
+            "delta": 0.0,
+            "delta_pp": 0.0,
+            "relative_delta_pct": 0.0
+          }
+        }
+      },
+      "no_trajectory_dense": {
+        "dropped_branches": [
+          "trajectory_dense"
+        ],
+        "weights": {
+          "lexical": 0.0,
+          "dense_text": 0.0,
+          "multimodal": 0.0,
+          "graph_dense": 1.0,
+          "trajectory_dense": 0.0
+        },
+        "metrics": {
+          "recall@50": 0.0,
+          "recall@100": 0.0,
+          "recall@200": 0.0
+        },
+        "delta_vs_full": {
+          "recall@50": {
+            "baseline": 0.0,
+            "variant": 0.0,
+            "delta": 0.0,
+            "delta_pp": 0.0,
+            "relative_delta_pct": 0.0
+          },
+          "recall@100": {
+            "baseline": 0.0,
+            "variant": 0.0,
+            "delta": 0.0,
+            "delta_pp": 0.0,
+            "relative_delta_pct": 0.0
+          },
+          "recall@200": {
+            "baseline": 0.0,
+            "variant": 0.0,
+            "delta": 0.0,
+            "delta_pp": 0.0,
+            "relative_delta_pct": 0.0
+          }
+        }
+      }
+    },
+    "branch_importance": [
+      {
+        "branch": "lexical",
+        "recall@100_delta_without_branch": 0.0
+      },
+      {
+        "branch": "dense_text",
+        "recall@100_delta_without_branch": 0.0
+      },
+      {
+        "branch": "multimodal",
+        "recall@100_delta_without_branch": 0.0
+      },
+      {
+        "branch": "graph_dense",
+        "recall@100_delta_without_branch": 0.0
+      },
+      {
+        "branch": "trajectory_dense",
+        "recall@100_delta_without_branch": 0.0
+      }
+    ]
+  },
+  "retriever_blend_weights": {
+    "lexical": 0.0,
+    "dense_text": 0.0,
+    "multimodal": 0.0,
+    "graph_dense": 1.0,
+    "trajectory_dense": 0.0
+  },
+  "retriever_eval": {
+    "recall@50": 0.0,
+    "recall@100": 0.0,
+    "recall@200": 0.0
+  },
+  "ranker_eval": {
+    "ndcg@10": 0.0,
+    "mrr@10": 0.0,
+    "ndcg@20": 0.0,
+    "mrr@20": 0.0
+  }
+}

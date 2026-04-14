@@ -19,6 +19,17 @@ from .artifacts import ArtifactRegistry
 from .baseline_common import as_float, round_score, sanitize_probability
 
 
+def _lgbm_device_params() -> dict:
+    """Return LightGBM params for GPU training if available."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return {"device_type": "gpu", "gpu_use_dp": False}
+    except ImportError:
+        pass
+    return {}
+
+
 LEARNED_RERANKER_VERSION = "recommender.ranker.learned_pairwise.v1"
 LEARNED_RERANKER_ID = "learned_pairwise_lgbm"
 LEARNED_RERANKER_LABEL_POLICY_VERSION = "pairwise_supervision.v2"
@@ -32,6 +43,7 @@ LEARNED_RERANKER_FEATURE_NAMES = [
     "baseline_score",
     "score_component_semantic_relevance",
     "score_component_intent_alignment",
+    "score_component_performance_quality",
     "score_component_reference_usefulness",
     "score_component_support_confidence",
     "retrieval_semantic",
@@ -54,6 +66,7 @@ LEARNED_RERANKER_FEATURE_NAMES = [
     "trajectory_regime_confidence",
     "has_reason_semantic",
     "has_reason_intent",
+    "has_reason_performance",
     "has_reason_reference",
     "has_reason_support",
     "has_reason_multi_branch",
@@ -95,6 +108,9 @@ def candidate_feature_payload_from_item(item: Dict[str, Any]) -> Dict[str, float
         ),
         "score_component_intent_alignment": sanitize_probability(
             score_components.get("intent_alignment"), 0.0
+        ),
+        "score_component_performance_quality": sanitize_probability(
+            score_components.get("performance_quality"), 0.0
         ),
         "score_component_reference_usefulness": sanitize_probability(
             score_components.get("reference_usefulness"), 0.0
@@ -149,6 +165,7 @@ def candidate_feature_payload_from_item(item: Dict[str, Any]) -> Dict[str, float
         ),
         "has_reason_semantic": _bool_flag("strong_semantic_relevance" in reasons),
         "has_reason_intent": _bool_flag("strong_intent_alignment" in reasons),
+        "has_reason_performance": _bool_flag("strong_performance_quality" in reasons),
         "has_reason_reference": _bool_flag("strong_reference_usefulness" in reasons),
         "has_reason_support": _bool_flag("strong_support_confidence" in reasons),
         "has_reason_multi_branch": _bool_flag("multi_branch_retrieval_match" in reasons),
@@ -243,9 +260,10 @@ class LearnedPairwiseReranker:
                 min_data_in_bin=1,
                 subsample=0.9,
                 colsample_bytree=0.9,
-                n_jobs=1,
+                n_jobs=-1,
                 verbosity=-1,
                 random_state=int(random_state),
+                **_lgbm_device_params(),
             )
             model.fit(x, y, sample_weight=sample_weight)
             model_type = "lightgbm_classifier"
@@ -580,6 +598,9 @@ class LearnedPairwiseReranker:
             )
         with (output_dir / "model.pkl").open("rb") as handle:
             model = pickle.load(handle)
+        # Patch sklearn forward-compat: multi_class removed in 1.7+
+        if hasattr(model, "predict_proba") and not hasattr(model, "multi_class"):
+            model.multi_class = "auto"
         return cls(
             objective=str(manifest.get("objective") or ""),
             model=model,

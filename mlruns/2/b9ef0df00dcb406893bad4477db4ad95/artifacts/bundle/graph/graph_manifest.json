@@ -1,0 +1,38 @@
+{
+  "version": "creator_video_dna_graph.v2",
+  "graph_bundle_id": "6283eb94d594d611",
+  "graph_schema_hash": "3d1939867b442668d46c7b3b011b1e93e3ae713e0726acf91941544ec714bf6f",
+  "created_at": "2026-04-14T18:10:00.960647Z",
+  "config": {
+    "embedding_dim": 32,
+    "walk_length": 12,
+    "num_walks": 20,
+    "context_size": 4,
+    "seed": 13,
+    "recency_half_life_days": 45.0,
+    "include_creator_similarity": true,
+    "creator_similarity_top_k": 5,
+    "creator_similarity_min_jaccard": 0.15
+  },
+  "tables": {
+    "nodes": {
+      "format": "parquet",
+      "path": "nodes.parquet"
+    },
+    "edges": {
+      "format": "parquet",
+      "path": "edges.parquet"
+    },
+    "embeddings": {
+      "format": "parquet",
+      "path": "embeddings.parquet"
+    }
+  },
+  "node_count": 100,
+  "edge_count": 50,
+  "video_embedding_count": 50,
+  "creator_embedding_count": 50,
+  "hashtag_embedding_count": 0,
+  "audio_embedding_count": 0,
+  "style_embedding_count": 0
+}

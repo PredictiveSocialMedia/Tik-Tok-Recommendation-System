@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 
 import mlflow
-from mlflow.tracking import MlflowClient
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -52,25 +52,7 @@ def main() -> int:
         default="recommender-training",
         help="MLflow experiment name.",
     )
-    parser.add_argument(
-        "--registered-model-name",
-        type=str,
-        default="tiktok-recommender",
-        help="MLflow registered model name.",
-    )
-    parser.add_argument(
-        "--register-model",
-        dest="register_model",
-        action="store_true",
-        help="Register the trained output in MLflow Model Registry.",
-    )
-    parser.add_argument(
-        "--no-register-model",
-        dest="register_model",
-        action="store_false",
-        help="Disable MLflow model registration.",
-    )
-    parser.set_defaults(register_model=True)
+    
     parser.add_argument(
         "--retrieve-k",
         type=int,
@@ -186,6 +168,25 @@ def main() -> int:
         default=None,
         help="Optional trajectory artifact manifest path/dir.",
     )
+    parser.add_argument(
+        "--blend-grid-levels",
+        type=int,
+        default=3,
+        help=(
+            "Points per axis in the retriever branch-weight grid search (2–11). "
+            "Lower is faster (default 3 => [0, 0.5, 1.0], 15 weight tuples). "
+            "Legacy full search used 5 levels (70 tuples) and could run for hours on large datamarts."
+        ),
+    )
+    parser.add_argument(
+        "--blend-max-eval-queries",
+        type=int,
+        default=128,
+        help=(
+            "Max labeled validation queries used when fitting per-objective retriever blend weights. "
+            "Caps retrieve() calls during grid search."
+        ),
+    )
     args = parser.parse_args()
     start_time = time.time()
 
@@ -193,6 +194,7 @@ def main() -> int:
         datamart = json.load(f)
     objectives = [item.strip() for item in args.objectives.split(",") if item.strip()]
     mlflow.set_experiment(args.experiment_name)
+
     with mlflow.start_run(run_name=args.run_name):
         mlflow.log_param("datamart_json", str(args.datamart_json))
         mlflow.log_param("artifact_root", str(args.artifact_root))
@@ -221,6 +223,8 @@ def main() -> int:
             "trajectory_manifest_path",
             str(args.trajectory_manifest_path) if args.trajectory_manifest_path else "None",
         )
+        mlflow.log_param("blend_grid_levels", max(2, min(11, int(args.blend_grid_levels))))
+        mlflow.log_param("blend_max_eval_queries", max(8, int(args.blend_max_eval_queries)))
         mlflow.log_param(
             "contract_version",
             str(datamart.get("source_contract_version", "contract.v2")),
@@ -264,6 +268,8 @@ def main() -> int:
                 trajectory_manifest_path=args.trajectory_manifest_path,
                 contract_version=str(datamart.get("source_contract_version", "contract.v2")),
                 datamart_version=str(datamart.get("version", "datamart.v1")),
+                blend_grid_levels=max(2, min(11, int(args.blend_grid_levels))),
+                blend_search_max_eval_queries=max(8, int(args.blend_max_eval_queries)),
             ),
         )
 
@@ -273,6 +279,7 @@ def main() -> int:
         bundle_dir = Path(result["bundle_dir"])
         mlflow.log_param("bundle_dir", str(bundle_dir))
         mlflow.log_param("bundle_name", bundle_dir.name)
+
         if bundle_dir.exists():
             mlflow.log_artifacts(str(bundle_dir), artifact_path="bundle")
 
@@ -286,8 +293,6 @@ def main() -> int:
             tmp_path = tmp_file.name
 
         mlflow.log_artifact(tmp_path, artifact_path="training")
-
-
     bundle_dir = Path(result["bundle_dir"])
     latest_link = args.artifact_root / "latest"
     if latest_link.exists() or latest_link.is_symlink():

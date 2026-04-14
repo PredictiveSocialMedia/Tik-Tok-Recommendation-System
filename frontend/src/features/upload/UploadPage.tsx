@@ -7,10 +7,10 @@ import {
   PanelTransitionWrapper,
   type LayoutMode
 } from "./components/PanelTransitionWrapper";
-import { PreviewThumbnailCard } from "./components/PreviewThumbnailCard";
 import { ProcessingCard } from "./components/ProcessingCard";
 import { UploadCard } from "./components/UploadCard";
 import { UploadForm } from "./components/UploadForm";
+import { VideoPlayerPanel } from "./components/VideoPlayerPanel";
 import { useUploadWorkflow } from "./hooks/useUploadWorkflow";
 
 interface UploadPageProps {
@@ -30,7 +30,9 @@ export function UploadPage(props: UploadPageProps): JSX.Element {
       ? "merged"
       : uploadWorkflow.phase === "done"
         ? "results"
-        : "split";
+        : uploadWorkflow.selectedFile
+          ? "split"
+          : "upload";
 
   useEffect(() => {
     if (uploadWorkflow.phase !== "done") {
@@ -49,9 +51,10 @@ export function UploadPage(props: UploadPageProps): JSX.Element {
         onRetry={uploadWorkflow.retryProcessing}
       />
     ) : layoutMode === "results" ? (
-      <PreviewThumbnailCard
+      <VideoPlayerPanel
         videoUrl={uploadWorkflow.previewUrl}
         fileName={uploadWorkflow.selectedFile?.name ?? null}
+        analysis={uploadWorkflow.analysisResult}
       />
     ) : (
       <UploadCard
@@ -67,6 +70,8 @@ export function UploadPage(props: UploadPageProps): JSX.Element {
       <div className="results-reveal">
         <ReportPanel
           report={uploadWorkflow.reportResult}
+          suggestedHashtags={uploadWorkflow.reportHashtags}
+          userHashtags={uploadWorkflow.userHashtags}
           isExpanded={isReportExpanded}
           onToggleExpand={() => setIsReportExpanded((previous) => !previous)}
           onShowPreview={() => setIsReportExpanded(false)}
@@ -76,6 +81,7 @@ export function UploadPage(props: UploadPageProps): JSX.Element {
       <UploadForm
         values={uploadWorkflow.formValues}
         disabled={uploadWorkflow.isBusy}
+        isAnalyzing={uploadWorkflow.isAnalyzing}
         error={uploadWorkflow.error}
         onDescriptionChange={uploadWorkflow.setDescription}
         onMentionsChange={uploadWorkflow.setMentions}
@@ -100,6 +106,7 @@ export function UploadPage(props: UploadPageProps): JSX.Element {
 
       <FloatingChatWidget
         report={uploadWorkflow.reportResult}
+        videoAnalysis={uploadWorkflow.analysisResult}
         chatService={chatService}
         resetKey={uploadWorkflow.uploadSession}
       />

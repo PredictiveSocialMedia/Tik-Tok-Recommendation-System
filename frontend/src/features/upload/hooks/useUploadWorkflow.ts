@@ -8,15 +8,24 @@ import type {
   UploadPhase,
   VideoAnalysisResult
 } from "../../../services/contracts/models";
+import { suggestDescription } from "../../../services/api/suggestDescriptionApi";
 import { PROCESSING_STEPS } from "../processingSteps";
 import {
   useProcessingFlow,
   type ProcessingStatus,
-  type ProcessingStep
+  type ProcessingStep,
+  type ProgressCallback
 } from "./useProcessingFlow";
 
 interface UseUploadWorkflowParams {
   analysisService: IVideoAnalysisService;
+}
+
+export interface ReportHashtagSuggestion {
+  hashtag: string;
+  score: number;
+  frequency: number;
+  avg_engagement: number;
 }
 
 interface UseUploadWorkflowResult {
@@ -27,8 +36,11 @@ interface UseUploadWorkflowResult {
   error: string | null;
   analysisResult: VideoAnalysisResult | null;
   reportResult: ReportOutput | null;
+  reportHashtags: ReportHashtagSuggestion[];
+  userHashtags: string[];
   uploadSession: number;
   isBusy: boolean;
+  isAnalyzing: boolean;
   loadingLabel: string;
   processingSteps: ProcessingStep[];
   processingStatus: ProcessingStatus;
@@ -50,6 +62,7 @@ interface UseUploadWorkflowResult {
 interface UploadTaskResult {
   analysis: VideoAnalysisResult;
   report: ReportOutput;
+  hashtags: ReportHashtagSuggestion[];
 }
 
 const INITIAL_FORM_VALUES: UploadFormValues = {
@@ -69,31 +82,47 @@ const INITIAL_FORM_VALUES: UploadFormValues = {
 const PROCESSING_ERROR_MESSAGE =
   "A processing error happened. Please try again.";
 
-const REPORT_STEP_INDEX = PROCESSING_STEPS.findIndex((step) => step.id === "report");
-const REPORT_STEP_START_DELAY_MS = PROCESSING_STEPS.slice(
-  0,
-  Math.max(0, REPORT_STEP_INDEX)
-).reduce((total, step) => total + step.durationMs, 0);
+// no-op: step progression is now real-time via onProgress callback
 
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
+function buildSignalHints(
+  formValues: UploadFormValues,
+  analysisResult?: VideoAnalysisResult | null
+): SignalHintsPayload {
+  if (analysisResult?.signal_hints) {
+    return {
+      ...analysisResult.signal_hints,
+      transcript_text: analysisResult.transcript || formValues.description,
+      video_caption: analysisResult.video_caption || "",
+      ocr_text: analysisResult.ocr_text || ""
+    };
+  }
+  return {
+    transcript_text: formValues.description.trim() || undefined
+  };
 }
 
-function buildSignalHints(formValues: UploadFormValues): SignalHintsPayload {
-  return {
-    transcript_text: formValues.description,
-    ocr_text: "",
-    estimated_scene_cuts: undefined,
-    fps: undefined,
-    visual_motion_score: undefined,
-    speech_seconds: undefined,
-    music_seconds: undefined,
-    tempo_bpm: undefined,
-    audio_energy: undefined,
-    loudness_lufs: undefined
-  };
+function mergeSignalHints(
+  ...sources: Array<SignalHintsPayload | undefined>
+): SignalHintsPayload | undefined {
+  const merged: SignalHintsPayload = {};
+
+  for (const source of sources) {
+    if (!source) {
+      continue;
+    }
+    for (const [key, value] of Object.entries(source)) {
+      if (value === undefined || value === null) {
+        continue;
+      }
+      if (typeof value === "string" && !value.trim()) {
+        continue;
+      }
+      const typedKey = key as keyof SignalHintsPayload;
+      merged[typedKey] = value;
+    }
+  }
+
+  return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
 export function useUploadWorkflow(
@@ -111,7 +140,10 @@ export function useUploadWorkflow(
     null
   );
   const [reportResult, setReportResult] = useState<ReportOutput | null>(null);
+  const [reportHashtags, setReportHashtags] = useState<ReportHashtagSuggestion[]>([]);
   const [uploadSession, setUploadSession] = useState<number>(0);
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [preAnalysis, setPreAnalysis] = useState<VideoAnalysisResult | null>(null);
 
   const processingFlow = useProcessingFlow({ steps: PROCESSING_STEPS });
 
@@ -200,15 +232,105 @@ export function useUploadWorkflow(
 
   const onFileSelected = (file: File | null): void => {
     setSelectedFile(file);
+    setPreAnalysis(null);
+    setIsAnalyzing(false);
 
-    if (file) {
-      setError(null);
-      setAnalysisResult(null);
-      setReportResult(null);
-      if (processingFlow.status !== "processing") {
-        setPhase("idle");
-      }
+    if (!file) {
+      return;
     }
+
+    setError(null);
+    setAnalysisResult(null);
+    setReportResult(null);
+    if (processingFlow.status !== "processing") {
+      setPhase("idle");
+    }
+
+    if (!file.type.startsWith("video/")) {
+      return;
+    }
+
+    // Fire background video analysis immediately on file select
+    setIsAnalyzing(true);
+    const capturedFile = file;
+
+    analysisService
+      .analyzeVideo({
+        file: capturedFile,
+        mentions: [],
+        hashtags: [],
+        description: "",
+        objective: "engagement",
+        content_type: "showcase",
+        primary_cta: "none",
+        locale: formValues.locale
+      })
+      .then((result) => {
+        // Only apply if this file is still the selected one
+        setSelectedFile((current) => {
+          if (current !== capturedFile) {
+            return current;
+          }
+
+          setPreAnalysis(result);
+          setIsAnalyzing(false);
+
+          // Use DeepSeek to generate a smart description from all analysis data.
+          // Falls back to raw caption/transcript if the API call fails.
+          suggestDescription(
+            result,
+            formValues.objective,
+            formValues.content_type,
+            formValues.locale
+          )
+            .then((suggestion) => {
+              if (suggestion.description) {
+                setFormValues((prev) => ({
+                  ...prev,
+                  description: prev.description || suggestion.description
+                }));
+              } else {
+                // Fallback: use raw VLM caption or transcript
+                const fallback = result.video_caption || result.transcript || "";
+                if (fallback) {
+                  setFormValues((prev) => ({
+                    ...prev,
+                    description: prev.description || fallback
+                  }));
+                }
+              }
+
+              // Auto-fill suggested hashtags from DeepSeek
+              if (suggestion.hashtags && suggestion.hashtags.length > 0) {
+                setFormValues((prev) => {
+                  if (prev.hashtags.length > 0) return prev;
+                  return {
+                    ...prev,
+                    hashtags: suggestion.hashtags.slice(0, 8).map((h) =>
+                      h.replace(/^#/, "").trim().toLowerCase()
+                    ).filter(Boolean)
+                  };
+                });
+              }
+            })
+            .catch(() => {
+              // Fallback on error: use raw caption/transcript
+              const fallback = result.video_caption || result.transcript || "";
+              if (fallback) {
+                setFormValues((prev) => ({
+                  ...prev,
+                  description: prev.description || fallback
+                }));
+              }
+            });
+
+          return current;
+        });
+      })
+      .catch((err) => {
+        console.warn("Background video analysis failed:", err);
+        setIsAnalyzing(false);
+      });
   };
 
   const retryProcessing = (): void => {
@@ -241,34 +363,70 @@ export function useUploadWorkflow(
     setPhase("processing");
 
     processingFlow.startProcessing({
-      task: async (): Promise<UploadTaskResult> => {
-        const taskStartedAt = Date.now();
+      task: async (onProgress: ProgressCallback): Promise<UploadTaskResult> => {
+        // Step 1: Upload & analyze video (frames, vision, transcript, timeline)
+        onProgress("upload");
 
-        const analysis = await analysisService.analyzeVideo({
-          file: selectedFile,
-          mentions: formValues.mentions,
-          hashtags: formValues.hashtags,
-          description: formValues.description,
-          objective: formValues.objective,
-          audience: formValues.audience,
-          content_type: formValues.content_type,
-          primary_cta: formValues.primary_cta,
-          locale: formValues.locale,
-          signal_hints: buildSignalHints(formValues)
-        });
+        const requestSignalHints = buildSignalHints(formValues);
 
-        const elapsedMs = Date.now() - taskStartedAt;
-        const remainingBeforeReportStep = Math.max(
-          0,
-          REPORT_STEP_START_DELAY_MS - elapsedMs
-        );
-
-        if (remainingBeforeReportStep > 0) {
-          await wait(remainingBeforeReportStep);
+        // Run video analysis — this calls the Python service which does
+        // frame extraction, scene detection, whisper, OCR, etc.
+        onProgress("frames");
+        let analysis: VideoAnalysisResult;
+        if (preAnalysis) {
+          analysis = preAnalysis;
+        } else {
+          try {
+            analysis = await analysisService.analyzeVideo({
+              file: selectedFile,
+              mentions: formValues.mentions,
+              hashtags: formValues.hashtags,
+              description: formValues.description,
+              objective: formValues.objective,
+              audience: formValues.audience,
+              content_type: formValues.content_type,
+              primary_cta: formValues.primary_cta,
+              locale: formValues.locale,
+              signal_hints: requestSignalHints
+            });
+          } catch (analysisErr) {
+            console.warn("Video analysis failed, continuing with stub:", analysisErr);
+            const stubId = crypto.randomUUID();
+            analysis = {
+              asset_id: stubId,
+              summary: "",
+              keyTopics: [],
+              suggestedEdits: [],
+              metrics: { retention: 0, hookStrength: 0, clarity: 0 },
+              asset: {
+                asset_id: stubId,
+                original_filename: selectedFile.name,
+                content_type: selectedFile.type || "video/mp4",
+                size_bytes: selectedFile.size,
+              },
+            };
+          }
         }
 
-        const report = await generateReport({
-          seed_video_id: "s001",
+        // Video analysis done — expose timeline immediately so
+        // VideoPlayerPanel renders even if report generation fails.
+        setAnalysisResult(analysis);
+        onProgress("timeline");
+
+        // Step 2: Build signal hints & generate report
+        const mergedSignalHints = mergeSignalHints(
+          analysis.signal_hints,
+          requestSignalHints
+        );
+        const reportSignalHints = mergeSignalHints(
+          mergedSignalHints,
+          buildSignalHints(formValues, analysis)
+        );
+
+        onProgress("compare");
+
+        const reportResult = await generateReport({
+          asset_id: analysis.asset_id,
           mentions: formValues.mentions,
           hashtags: formValues.hashtags,
           description: formValues.description,
@@ -277,14 +435,17 @@ export function useUploadWorkflow(
           content_type: formValues.content_type,
           primary_cta: formValues.primary_cta,
           locale: formValues.locale,
-          signal_hints: buildSignalHints(formValues)
+          signal_hints: reportSignalHints
         });
 
-        return { analysis, report };
+        onProgress("report");
+
+        return { analysis, report: reportResult.report, hashtags: reportResult.suggested_hashtags ?? [] };
       },
       onSuccess: (result) => {
         setAnalysisResult(result.analysis);
         setReportResult(result.report);
+        setReportHashtags(result.hashtags);
         setError(null);
         setPhase("done");
       },
@@ -310,8 +471,11 @@ export function useUploadWorkflow(
     error,
     analysisResult,
     reportResult,
+    reportHashtags,
+    userHashtags: formValues.hashtags,
     uploadSession,
     isBusy,
+    isAnalyzing,
     loadingLabel,
     processingSteps: PROCESSING_STEPS,
     processingStatus: processingFlow.status,

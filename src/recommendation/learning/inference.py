@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import re
 import time
 import uuid
@@ -10,6 +9,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+from src.common.config import settings
 
 from .artifacts import ArtifactRegistry
 from .baseline_common import (
@@ -54,6 +55,7 @@ from .learned_reranker import (
     LearnedPairwiseReranker,
 )
 from .objectives import map_objective
+from .policy import PolicyReranker, PolicyRerankerConfig
 from .query_contract import build_query_profile
 from .ranking_baseline import rank_shortlist
 from .retrieval_baseline import (
@@ -131,28 +133,32 @@ SUPPORT_FULL_THRESHOLD = 0.75
 SUPPORT_PARTIAL_THRESHOLD = 0.45
 
 DEFAULT_RANKING_WEIGHTS = {
-    "semantic_relevance": 0.40,
-    "intent_alignment": 0.30,
-    "reference_usefulness": 0.20,
+    "semantic_relevance": 0.30,
+    "intent_alignment": 0.25,
+    "performance_quality": 0.20,
+    "reference_usefulness": 0.15,
     "support_confidence": 0.10,
 }
 OBJECTIVE_RANKING_WEIGHTS = {
     "reach": {
-        "semantic_relevance": 0.42,
-        "intent_alignment": 0.26,
-        "reference_usefulness": 0.22,
+        "semantic_relevance": 0.28,
+        "intent_alignment": 0.22,
+        "performance_quality": 0.25,
+        "reference_usefulness": 0.15,
         "support_confidence": 0.10,
     },
     "engagement": {
-        "semantic_relevance": 0.38,
-        "intent_alignment": 0.32,
-        "reference_usefulness": 0.20,
+        "semantic_relevance": 0.28,
+        "intent_alignment": 0.25,
+        "performance_quality": 0.22,
+        "reference_usefulness": 0.15,
         "support_confidence": 0.10,
     },
     "conversion": {
-        "semantic_relevance": 0.34,
-        "intent_alignment": 0.36,
-        "reference_usefulness": 0.20,
+        "semantic_relevance": 0.26,
+        "intent_alignment": 0.30,
+        "performance_quality": 0.20,
+        "reference_usefulness": 0.14,
         "support_confidence": 0.10,
     },
 }
@@ -384,7 +390,7 @@ def _candidate_video_id(row_id: str) -> str:
 
 
 def _load_fabric_from_env() -> FeatureFabric:
-    calibration_path = os.getenv("FABRIC_CALIBRATION_PATH", "").strip()
+    calibration_path = settings.fabric_calibration_path
     if not calibration_path:
         return FeatureFabric()
     path = Path(calibration_path)
@@ -560,24 +566,45 @@ def _support_confidence_score(level: str, score: float) -> float:
     return _round(_clamp((tier_floor * 0.55) + (score * 0.45), 0.0, 1.0), 6)
 
 
+FRESHNESS_HALF_LIFE_DAYS = 18.0
+
+
 def _freshness_score(posted_at: Optional[datetime], reference_date: datetime) -> float:
     if posted_at is None:
         return 0.55
     age_days = max(0.0, (reference_date - posted_at).total_seconds() / 86400.0)
-    return _round(_clamp(math.exp((-math.log(2.0) * age_days) / 60.0), 0.0, 1.0), 6)
+    return _round(_clamp(math.exp((-math.log(2.0) * age_days) / FRESHNESS_HALF_LIFE_DAYS), 0.0, 1.0), 6)
+
+
+def _performance_quality_score(candidate: Dict[str, Any]) -> float:
+    metrics = candidate.get("engagement_metrics") or {}
+    views = _as_float(metrics.get("views"), 0.0)
+    engagement_rate = _as_float(metrics.get("engagement_rate"), 0.0)
+    view_signal = math.log1p(views) / math.log1p(10_000_000) if views > 0 else 0.0
+    er_signal = min(engagement_rate / 0.10, 1.0)
+    return _round(_clamp(view_signal * 0.55 + er_signal * 0.45, 0.0, 1.0), 6)
 
 
 def _reference_usefulness(candidate: Dict[str, Any], reference_date: datetime) -> float:
     comment_trace = candidate["comment_trace"]
-    performance_quality = _sanitize_probability(candidate["support_score"], 0.0)
+    metadata_quality = _sanitize_probability(candidate["support_score"], 0.0)
     freshness = _freshness_score(candidate.get("posted_at"), reference_date)
     comment_richness = _sanitize_probability(comment_trace.get("value_prop_coverage"), 0.0)
     share_signal = _sanitize_probability(comment_trace.get("on_topic_ratio"), 0.0)
+    fabric = candidate.get("fabric_signals") or {}
+    content_quality = _clamp(
+        (_as_float(fabric.get("clarity_score"), 0.5) * 0.5)
+        + (_as_float(fabric.get("pacing_score"), 0.5) * 0.3)
+        + (min(_as_float(fabric.get("cta_keyword_count"), 0), 3) / 3.0 * 0.2),
+        0.0,
+        1.0,
+    )
     return _round(
         _clamp(
-            (performance_quality * 0.40)
+            (metadata_quality * 0.25)
             + (freshness * 0.20)
-            + (comment_richness * 0.20)
+            + (content_quality * 0.20)
+            + (comment_richness * 0.15)
             + (share_signal * 0.10)
             + (candidate["support_score"] * 0.10),
             0.0,
@@ -638,6 +665,7 @@ def _score_components_for_candidate(
         ),
         6,
     )
+    performance_quality = _performance_quality_score(candidate)
     reference_usefulness = _reference_usefulness(candidate, reference_date)
     support_confidence = _support_confidence_score(
         candidate["support_level"], candidate["support_score"]
@@ -645,6 +673,7 @@ def _score_components_for_candidate(
     return {
         "semantic_relevance": semantic_relevance,
         "intent_alignment": intent_alignment,
+        "performance_quality": performance_quality,
         "reference_usefulness": reference_usefulness,
         "support_confidence": support_confidence,
     }
@@ -948,6 +977,26 @@ class RecommenderRuntime:
             self.retriever = None
             self.retriever_load_warning = f"retriever_load_failed: {error}"
 
+        # Reconcile graph/trajectory metadata with actual retriever blend
+        if self.retriever is not None and manifest_path.exists():
+            try:
+                ret_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                blend = ret_manifest.get("objective_blend") or {}
+                graph_used = any(
+                    float((weights or {}).get("graph_dense") or 0) > 0
+                    for weights in blend.values()
+                )
+                trajectory_used = any(
+                    float((weights or {}).get("trajectory_dense") or 0) > 0
+                    for weights in blend.values()
+                )
+                if not graph_used:
+                    self.graph_bundle_id = ""
+                if not trajectory_used:
+                    self.trajectory_manifest_id = ""
+            except Exception:
+                pass
+
     def _load_comment_feature_index(self) -> None:
         manifest_path = self.manifest.get("comment_feature_manifest_path")
         manifest_id = self.manifest.get("comment_feature_manifest_id")
@@ -969,6 +1018,42 @@ class RecommenderRuntime:
                 self.comment_index = None
                 self.comment_index_source_path = None
                 self.comment_index_load_error = str(error)
+
+        # Auto-discover comment intelligence from well-known directories
+        import os as _os
+        discovery_dirs: List[Path] = []
+        env_dir = _os.environ.get("COMMENT_INTELLIGENCE_DIR", "").strip()
+        if env_dir:
+            discovery_dirs.append(Path(env_dir))
+        discovery_dirs.extend([
+            self.bundle_dir.parent.parent / "comment_intelligence" / "features",
+            Path("artifacts") / "comment_intelligence" / "features",
+        ])
+        best_manifest: Optional[Path] = None
+        best_generated_at: Optional[str] = None
+        for search_dir in discovery_dirs:
+            if not search_dir.is_dir():
+                continue
+            for child in search_dir.iterdir():
+                candidate = child / "manifest.json"
+                if not candidate.exists():
+                    continue
+                try:
+                    payload = json.loads(candidate.read_text(encoding="utf-8"))
+                    gen_at = str(payload.get("generated_at") or "")
+                    if best_generated_at is None or gen_at > best_generated_at:
+                        best_manifest = candidate
+                        best_generated_at = gen_at
+                except Exception:
+                    continue
+        if best_manifest is not None:
+            try:
+                _, rows = load_comment_intelligence_snapshot_manifest(best_manifest)
+                self.comment_index = _CommentManifestIndex(rows)
+                self.comment_index_source_path = str(best_manifest)
+                self.comment_index_load_error = None
+            except Exception as error:
+                self.comment_index_load_error = f"auto_discover_failed: {error}"
 
     def _manifest_comment_for_row_id(self, *, row_id: str, as_of: datetime) -> Optional[Dict[str, Any]]:
         if self.comment_index is None:
@@ -1169,6 +1254,9 @@ class RecommenderRuntime:
             "graph_bundle_id": self.graph_bundle_id,
             "trajectory_manifest_id": self.trajectory_manifest_id,
             "trajectory_version": self.trajectory_version,
+            "dense_model_name": str(self.manifest.get("dense_model_name") or ""),
+            "retriever_loaded": self.retriever is not None,
+            "comment_index_loaded": self.comment_index is not None,
         }
         mismatches: List[Dict[str, str]] = []
         for key, expected_value in required.items():
@@ -1289,7 +1377,7 @@ class RecommenderRuntime:
         as_of: datetime,
         query_profile: Dict[str, Any],
     ) -> Optional[Dict[str, Any]]:
-        return prepare_candidate(
+        candidate = prepare_candidate(
             payload=payload,
             as_of=as_of,
             query_profile=query_profile,
@@ -1298,6 +1386,25 @@ class RecommenderRuntime:
                 as_of=point_in_time,
             ),
         )
+        if candidate is not None:
+            try:
+                fabric_out = self.fabric.extract({
+                    "video_id": candidate["candidate_id"],
+                    "as_of_time": as_of.isoformat(),
+                    "caption": candidate.get("text", ""),
+                    "hashtags": candidate.get("hashtags", []),
+                    "keywords": candidate.get("keywords", []),
+                    "content_type": candidate.get("content_type"),
+                })
+                candidate["fabric_signals"] = {
+                    "clarity_score": fabric_out.text.clarity_score,
+                    "pacing_score": fabric_out.structure.pacing_score,
+                    "cta_keyword_count": fabric_out.text.cta_keyword_count,
+                    "hook_timing_seconds": fabric_out.structure.hook_timing_seconds,
+                }
+            except Exception:
+                candidate["fabric_signals"] = {}
+        return candidate
 
     def _apply_explainability(
         self,
@@ -1536,20 +1643,6 @@ class RecommenderRuntime:
         policy_payload = policy_overrides if isinstance(policy_overrides, dict) else {}
         manifest_policy = self.manifest.get("policy_reranker")
         manifest_policy = manifest_policy if isinstance(manifest_policy, dict) else {}
-        max_items_per_author = max(
-            1,
-            _as_int(
-                policy_payload.get("max_items_per_author"),
-                _as_int(manifest_policy.get("max_items_per_author"), 2),
-            ),
-        )
-        strict_language = bool(policy_payload.get("strict_language", False))
-        strict_locale = bool(policy_payload.get("strict_locale", False))
-        dropped_by_rule = {
-            "language_mismatch": 0,
-            "locale_mismatch": 0,
-            "author_cap": 0,
-        }
 
         portfolio_supported = bool(ranking_meta["portfolio_supported"])
         portfolio_requested = bool(ranking_meta["portfolio_requested"])
@@ -1558,23 +1651,29 @@ class RecommenderRuntime:
         risk_aversion = float(ranking_meta["risk_aversion"])
         ranking_weights = ranking_meta["weights"]
 
-        selected: List[Dict[str, Any]] = []
-        author_counts: Dict[str, int] = {}
+        policy_config = PolicyRerankerConfig.from_payload({
+            **manifest_policy,
+            **policy_payload,
+        })
+        policy_reranker = PolicyReranker(config=policy_config)
         for item in ranked:
-            if strict_language and query_profile["language"] and item["language"] and item["language"] != query_profile["language"]:
-                dropped_by_rule["language_mismatch"] += 1
-                continue
-            if strict_locale and query_profile["locale"] and item["locale"] and item["locale"] != query_profile["locale"]:
-                dropped_by_rule["locale_mismatch"] += 1
-                continue
-            author_count = author_counts.get(item["author_id"], 0)
-            if author_count >= max_items_per_author:
-                dropped_by_rule["author_cap"] += 1
-                continue
-            author_counts[item["author_id"]] = author_count + 1
-            selected.append(item)
-            if len(selected) >= max(1, int(top_k)):
-                break
+            item["_author_id"] = item.get("author_id", "unknown")
+            item["_topic_key"] = item.get("topic_key", "unknown")
+            item["_language"] = item.get("language")
+            item["_locale"] = item.get("locale")
+            item["_candidate_as_of_time"] = item.get("posted_at")
+        selected, policy_meta = policy_reranker.rerank(
+            ranked_items=ranked,
+            query_context={
+                "as_of_time": as_of,
+                "language": query_profile.get("language"),
+                "locale": query_profile.get("locale"),
+            },
+            top_k=top_k,
+            overrides=policy_payload,
+            portfolio=portfolio if portfolio_supported else None,
+        )
+        dropped_by_rule = policy_meta.get("dropped_by_rule", {})
 
         fallback_mode = False
         fallback_reason: Optional[str] = None
@@ -1662,16 +1761,23 @@ class RecommenderRuntime:
                 "trajectory_dense": _round(trajectory_dense_score, 6),
                 "fused": _round(raw_branch_scores.get("fused", fused_retrieval), 6),
             }
+            eng = item.get("engagement_metrics") or {}
             payload = {
                 "candidate_id": item["candidate_id"],
                 "candidate_row_id": item["candidate_row_id"],
                 "author_id": item.get("author_id"),
+                "caption": str(item.get("raw_text") or item.get("text") or ""),
                 "topic_key": item.get("topic_key"),
                 "content_type": item.get("content_type"),
                 "language": item.get("language"),
                 "locale": item.get("locale"),
                 "hashtags": list(item.get("hashtags") or []),
                 "keywords": list(item.get("keywords") or []),
+                "views": int(eng.get("views", 0)),
+                "likes": int(eng.get("likes", 0)),
+                "comments_count": int(eng.get("comments", 0)),
+                "shares": int(eng.get("shares", 0)),
+                "engagement_rate": float(eng.get("engagement_rate", 0.0)),
                 "rank": rank,
                 "score": _round(item["score"], 6),
                 "score_raw": _round(item["score_raw"], 6),
@@ -1778,9 +1884,9 @@ class RecommenderRuntime:
             "user_adaptation_metadata": user_adaptation_metadata,
             "policy_version": BASELINE_POLICY_VERSION,
             "policy_metadata": {
-                "strict_language": strict_language,
-                "strict_locale": strict_locale,
-                "max_items_per_author": max_items_per_author,
+                "strict_language": bool(policy_meta.get("strict_language", False)),
+                "strict_locale": bool(policy_meta.get("strict_locale", False)),
+                "max_items_per_author": _as_int(policy_meta.get("max_items_per_author"), 2),
                 "dropped_by_rule": dropped_by_rule,
             },
             "routing_decision": routing_decision,

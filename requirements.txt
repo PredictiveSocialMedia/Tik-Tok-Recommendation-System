@@ -11,3 +11,4 @@ psycopg[binary]>=3.2
 pytest>=7.0
 pytest-cov>=5.0
 mlflow>=2.11
+-r requirements-dev.txt
