@@ -1,7 +1,12 @@
 {
   "installCommand": "npm install && cd frontend && npm install",
-  "buildCommand": "cd frontend && npx vite build",
+  "buildCommand": "npx vite build --root frontend --outDir dist",
   "outputDirectory": "frontend/dist",
+  "functions": {
+    "api/*.ts": {
+      "runtime": "@vercel/node@3"
+    }
+  },
   "rewrites": [
     {
       "source": "/chat",
