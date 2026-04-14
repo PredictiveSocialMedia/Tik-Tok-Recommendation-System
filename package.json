@@ -1,6 +1,7 @@
 {
   "private": true,
   "dependencies": {
-    "@vercel/node": "^5.0.0"
+    "@vercel/node": "^5.0.0",
+    "pg": "^8.13.0"
   }
 }
