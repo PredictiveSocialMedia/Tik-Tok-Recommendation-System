@@ -1,4 +1,5 @@
 import type { ReportOutput } from "../../src/features/report/types";
+import type { KnowledgeBaseEntry } from "../knowledgeBase/knowledgeBase";
 
 function normalize(value: string): string {
   return value
@@ -58,11 +59,22 @@ function buildGeneralDiagnosis(report: ReportOutput, normalizedQuestion: string)
   return `Quick diagnosis: ${cleanSentence(report.executive_summary.summary_text || "you have a workable draft, but execution can be sharper in the opening and CTA")}.`;
 }
 
-function buildGeneralActions(report: ReportOutput): string[] {
+function buildGeneralActions(
+  report: ReportOutput,
+  knowledgeBaseEntries: KnowledgeBaseEntry[]
+): string[] {
   const reportActions = report.recommendations.items
-    .slice(0, 3)
+    .slice(0, 2)
     .map((item) => cleanSentence(item.title))
     .filter(Boolean);
+
+  const kbAction = knowledgeBaseEntries
+    .map((entry) => cleanSentence(entry.action_hint))
+    .find((value) => value.length > 0);
+
+  if (kbAction && !reportActions.some((item) => item.toLowerCase() === kbAction.toLowerCase())) {
+    reportActions.push(kbAction);
+  }
 
   const fallbackActions = [
     "Make the first 1-2 seconds outcome-first with one clear promise",
@@ -74,14 +86,24 @@ function buildGeneralActions(report: ReportOutput): string[] {
   while (actions.length < 3) {
     actions.push(fallbackActions[actions.length]);
   }
-  return actions.slice(0, 3);
+  return uniqueLines(actions, 3).slice(0, 3);
 }
 
-function buildGeneralImpact(report: ReportOutput): string[] {
+function buildGeneralImpact(
+  report: ReportOutput,
+  knowledgeBaseEntries: KnowledgeBaseEntry[]
+): string[] {
   const impactLines = report.recommendations.items
-    .slice(0, 3)
+    .slice(0, 2)
     .map((item) => toAreaImpact(item.effect_area))
     .filter(Boolean);
+
+  const kbImpact = knowledgeBaseEntries
+    .map((entry) => cleanSentence(entry.content[0] || ""))
+    .find(Boolean);
+  if (kbImpact) {
+    impactLines.push(kbImpact);
+  }
 
   if (impactLines.length === 0) {
     return [
@@ -132,19 +154,65 @@ function buildHashtagAnswer(report: ReportOutput): string {
   ].join("\n");
 }
 
-export function buildLocalChatAnswer(
-  report: ReportOutput,
-  question: string
+function buildKnowledgeOnlyAnswer(
+  question: string,
+  knowledgeBaseEntries: KnowledgeBaseEntry[]
 ): string {
   const normalizedQuestion = normalize(question);
+  const fallbackEntries = knowledgeBaseEntries.slice(0, 3);
+  if (fallbackEntries.length === 0) {
+    return "Upload a video and generate a report to start chatting.";
+  }
+
+  const diagnosisEntry = fallbackEntries[0];
+  const diagnosisFact = cleanSentence(diagnosisEntry.content[0] || "TikTok performance usually improves with stronger hook clarity and a more explicit CTA.");
+  const actions = fallbackEntries.map((entry) => cleanSentence(entry.action_hint)).filter(Boolean);
+  const impact = fallbackEntries
+    .map((entry) => cleanSentence(entry.content[0] || ""))
+    .filter(Boolean)
+    .map((line) => `Expected impact: ${line}`);
+
+  const followUp = normalizedQuestion.includes("hashtag")
+    ? "Want me to suggest hashtag sets for this topic?"
+    : "Want me to turn this into a concrete script and shot list for your next post?";
+
+  return [
+    `Quick diagnosis: ${diagnosisFact}.`,
+    "",
+    "Top 3 actions:",
+    `1. ${actions[0] ?? "Open with one explicit outcome in the first two seconds"}.`,
+    `2. ${actions[1] ?? "Use one clear format shift to protect mid-video retention"}.`,
+    `3. ${actions[2] ?? "End with a specific one-step CTA"}.`,
+    "",
+    ...(impact.length > 0 ? impact.slice(0, 3) : ["Expected impact: stronger structure should improve completion and engagement quality."]),
+    "",
+    followUp
+  ].join("\n");
+}
+
+interface BuildLocalChatAnswerParams {
+  report: ReportOutput | null;
+  question: string;
+  knowledgeBaseEntries?: KnowledgeBaseEntry[];
+}
+
+export function buildLocalChatAnswer(
+  params: BuildLocalChatAnswerParams
+): string {
+  const { report, question } = params;
+  const knowledgeBaseEntries = params.knowledgeBaseEntries ?? [];
+  const normalizedQuestion = normalize(question);
+  if (!report) {
+    return buildKnowledgeOnlyAnswer(question, knowledgeBaseEntries);
+  }
 
   if (normalizedQuestion.includes("hashtag")) {
     return buildHashtagAnswer(report);
   }
 
   const diagnosis = buildGeneralDiagnosis(report, normalizedQuestion);
-  const actions = buildGeneralActions(report);
-  const impact = buildGeneralImpact(report);
+  const actions = buildGeneralActions(report, knowledgeBaseEntries);
+  const impact = buildGeneralImpact(report, knowledgeBaseEntries);
   const followUp = normalizedQuestion.includes("hook")
     ? "Want me to draft 3 hook options for your first 2 seconds?"
     : normalizedQuestion.includes("engagement")

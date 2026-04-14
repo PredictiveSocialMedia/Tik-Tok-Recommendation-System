@@ -30,6 +30,7 @@ import {
   RECOMMENDER_EXPERIMENT_TREATMENT_RATIO,
   RECOMMENDER_FEEDBACK_DB_URL,
   RECOMMENDER_FEEDBACK_ENABLED,
+  KNOWLEDGE_BASE_PATH,
   RECOMMENDER_BASE_URL,
   RECOMMENDER_FALLBACK_BUNDLE_DIR,
   RECOMMENDER_FALLBACK_CACHE_TTL_MS,
@@ -99,6 +100,12 @@ import {
   LabelingSessionStore,
   type LabelingReviewLabel
 } from "./labeling/store";
+import {
+  loadKnowledgeBaseStore,
+  searchKnowledgeBase,
+  type KnowledgeBaseEntry,
+  type KnowledgeBaseStore
+} from "./knowledgeBase/knowledgeBase";
 
 const TIKTOK_OEMBED_URL = "https://www.tiktok.com/oembed?url=";
 const THUMBNAIL_FETCH_TIMEOUT_MS = 7000;
@@ -113,6 +120,17 @@ const deepSeekClient = DEEPSEEK_ENABLED
     })
   : null;
 const uploadAnalysisProvider = createUploadAnalysisProvider();
+let knowledgeBaseStore: KnowledgeBaseStore;
+try {
+  knowledgeBaseStore = await loadKnowledgeBaseStore(KNOWLEDGE_BASE_PATH);
+  console.info(
+    `Knowledge base loaded: version=${knowledgeBaseStore.version} entries=${knowledgeBaseStore.entries.length}`
+  );
+} catch (error) {
+  const reason = error instanceof Error ? error.message : String(error);
+  console.error(`Knowledge base startup validation failed (${KNOWLEDGE_BASE_PATH}): ${reason}`);
+  throw error;
+}
 
 app.use(
   cors({
@@ -2920,6 +2938,8 @@ interface ToolResult {
   source: string;
   videos?: RAGVideo[];
   hashtags?: string[];
+  knowledgeBaseEntries?: KnowledgeBaseEntry[];
+  knowledgeBaseMeta?: Record<string, unknown>;
   retrievalMeta?: Record<string, unknown>;
   error?: string;
 }
@@ -2962,6 +2982,20 @@ function chatWantsExamples(question: string): boolean {
     normalized.includes("examples") ||
     normalized.includes("similar video") ||
     normalized.includes("reference")
+  );
+}
+
+function chatNeedsKnowledgeBase(question: string): boolean {
+  const normalized = question.toLowerCase();
+  return (
+    normalized.includes("algorithm") ||
+    normalized.includes("what performs") ||
+    normalized.includes("what works") ||
+    normalized.includes("top creator") ||
+    normalized.includes("top creators") ||
+    normalized.includes("top hashtag") ||
+    normalized.includes("top hashtags") ||
+    normalized.includes("trend")
   );
 }
 
@@ -3171,6 +3205,34 @@ async function callHashtagSuggest(question: string): Promise<ToolResult> {
   }
 }
 
+async function callKnowledgeBaseSearch(params: {
+  question: string;
+  objective: string;
+  priority: "high" | "low";
+}): Promise<ToolResult> {
+  try {
+    const result = searchKnowledgeBase(knowledgeBaseStore, {
+      question: params.question,
+      objective: params.objective,
+      maxResults: 3,
+      priority: params.priority
+    });
+    return {
+      source: "knowledge_base",
+      knowledgeBaseEntries: result.entries,
+      knowledgeBaseMeta: {
+        priority: result.priority,
+        matched_categories: result.matched_categories
+      }
+    };
+  } catch (error) {
+    return {
+      source: "knowledge_base",
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
 interface TimelineFrame {
   timestamp_sec: number;
   relevance_score: number;
@@ -3285,6 +3347,17 @@ function buildAgenticPrompt(params: {
     if (tool.source === "hashtags" && tool.hashtags && tool.hashtags.length > 0) {
       sections.push(`## AI-Suggested Hashtags\n${tool.hashtags.join(", ")}`);
     }
+    if (
+      tool.source === "knowledge_base" &&
+      tool.knowledgeBaseEntries &&
+      tool.knowledgeBaseEntries.length > 0
+    ) {
+      const lines = tool.knowledgeBaseEntries.map((entry, index) => {
+        const facts = entry.content.slice(0, 2).map((line) => truncateForPrompt(line, 120)).join(" | ");
+        return `${index + 1}. ${entry.title} [${entry.category}] -> action: ${truncateForPrompt(entry.action_hint, 120)} | facts: ${facts}`;
+      });
+      sections.push(`## TikTok Knowledge Base Insights\n${lines.join("\n")}`);
+    }
   }
 
   sections.push(
@@ -3321,7 +3394,7 @@ app.post("/chat", async (request, response) => {
     });
     const metricFocus = parsed.value.metricFocus || inferMetricFocus(question, objectiveEffective);
 
-    // --- Tool calls: always run corpus retrieval in coaching mode ---
+    // --- Tool calls: corpus RAG + KB retrieval (blend mode) ---
     const toolPromises: Promise<ToolResult>[] = [];
     toolPromises.push(
       callRAGRetrieval({
@@ -3335,6 +3408,13 @@ app.post("/chat", async (request, response) => {
     if (chatNeedsHashtags(question)) {
       toolPromises.push(callHashtagSuggest(question));
     }
+    toolPromises.push(
+      callKnowledgeBaseSearch({
+        question,
+        objective: objectiveEffective,
+        priority: chatNeedsKnowledgeBase(question) ? "high" : "low"
+      })
+    );
 
     const toolResults = await Promise.allSettled(toolPromises);
     const resolvedTools: ToolResult[] = toolResults
@@ -3344,12 +3424,14 @@ app.post("/chat", async (request, response) => {
     // --- Fallback if no LLM ---
     if (!DEEPSEEK_ENABLED) {
       // Enhanced local fallback that includes tool results
+      const knowledgeTool = resolvedTools.find((tool) => tool.source === "knowledge_base");
+      const knowledgeEntries = knowledgeTool?.knowledgeBaseEntries ?? [];
       let fallbackAnswer: string;
-      if (report) {
-        fallbackAnswer = buildLocalChatAnswer(report, question);
-      } else {
-        fallbackAnswer = "Upload a video and generate a report to start chatting.";
-      }
+      fallbackAnswer = buildLocalChatAnswer({
+        report,
+        question,
+        knowledgeBaseEntries: knowledgeEntries
+      });
 
       const hashtagTool = resolvedTools.find((t) => t.source === "hashtags");
       if (hashtagTool?.hashtags && hashtagTool.hashtags.length > 0) {
@@ -3421,9 +3503,12 @@ app.post("/chat", async (request, response) => {
       response.json({ answer });
     } catch (providerError) {
       console.error(providerError);
-      const fallback = report
-        ? buildLocalChatAnswer(report, question)
-        : "The AI assistant is currently unavailable. Please try again.";
+      const fallback = buildLocalChatAnswer({
+        report,
+        question,
+        knowledgeBaseEntries:
+          resolvedTools.find((tool) => tool.source === "knowledge_base")?.knowledgeBaseEntries ?? []
+      });
       response.setHeader("x-chat-source", "baseline-local-provider-error");
       response.json({
         answer: removeEmoji(fallback)

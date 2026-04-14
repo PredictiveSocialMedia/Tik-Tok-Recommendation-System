@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ReportOutput } from "../../src/features/report/types";
+import type { KnowledgeBaseEntry } from "../knowledgeBase/knowledgeBase";
 import { buildLocalChatAnswer } from "./buildLocalChatAnswer";
 
 function buildReport(): ReportOutput {
@@ -195,9 +196,44 @@ function buildReport(): ReportOutput {
   };
 }
 
+function buildKnowledgeEntries(): KnowledgeBaseEntry[] {
+  return [
+    {
+      id: "kb-1",
+      title: "Hook clarity improves early hold",
+      category: "hooks",
+      content: ["Specific hook lines usually improve first-second hold."],
+      action_hint: "Open with one specific promise in the first second.",
+      impact_area: "hook_strength",
+      keywords: ["hook", "opening", "first second"],
+      objective_tags: ["engagement"],
+      updated_at: "2026-04-14T10:00:00.000Z",
+      confidence: "high",
+      active: true
+    },
+    {
+      id: "kb-2",
+      title: "CTA specificity matters",
+      category: "cta",
+      content: ["Specific comment prompts tend to improve interaction quality."],
+      action_hint: "Use a direct, single-step comment CTA.",
+      impact_area: "comment_rate",
+      keywords: ["cta", "comment"],
+      objective_tags: ["engagement", "conversion"],
+      updated_at: "2026-04-14T10:00:00.000Z",
+      confidence: "medium",
+      active: true
+    }
+  ];
+}
+
 test("buildLocalChatAnswer returns the conversational coaching format", () => {
   const report = buildReport();
-  const answer = buildLocalChatAnswer(report, "How can I improve engagement?");
+  const answer = buildLocalChatAnswer({
+    report,
+    question: "How can I improve engagement?",
+    knowledgeBaseEntries: buildKnowledgeEntries()
+  });
 
   assert.match(answer, /Quick diagnosis:/);
   assert.match(answer, /Top 3 actions:/);
@@ -211,9 +247,36 @@ test("buildLocalChatAnswer returns the conversational coaching format", () => {
 
 test("buildLocalChatAnswer returns hashtag-specific guidance for hashtag queries", () => {
   const report = buildReport();
-  const answer = buildLocalChatAnswer(report, "which hashtags should I use?");
+  const answer = buildLocalChatAnswer({
+    report,
+    question: "which hashtags should I use?",
+    knowledgeBaseEntries: buildKnowledgeEntries()
+  });
 
   assert.match(answer, /Top 3 actions:/);
   assert.match(answer, /#dailyvlog/i);
   assert.match(answer, /Want me to suggest 8 hashtags ranked from safest to boldest\?/);
+});
+
+test("buildLocalChatAnswer blends KB action hints into report coaching", () => {
+  const report = buildReport();
+  const answer = buildLocalChatAnswer({
+    report,
+    question: "How do I improve engagement and algorithm performance?",
+    knowledgeBaseEntries: buildKnowledgeEntries()
+  });
+
+  assert.match(answer, /Open with one specific promise in the first second/i);
+});
+
+test("buildLocalChatAnswer returns structured KB guidance when report is missing", () => {
+  const answer = buildLocalChatAnswer({
+    report: null,
+    question: "what performs well on tiktok right now?",
+    knowledgeBaseEntries: buildKnowledgeEntries()
+  });
+
+  assert.match(answer, /Quick diagnosis:/);
+  assert.match(answer, /Top 3 actions:/);
+  assert.match(answer, /Expected impact:/);
 });
