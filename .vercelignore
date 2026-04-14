@@ -1,21 +1,23 @@
-# Everything except what Vercel needs
-artifacts/
+# Exclude non-frontend directories at the repo root
+/artifacts/
 /src/
-scraper/
-eda/
-diagnostics/
-venv/
-.venv/
-data/
-models/
-notebooks/
-hpc_logs/
-.git/
-.claude/
-node_modules/
-scripts/
-docs/
-tests/
+/scraper/
+/eda/
+/diagnostics/
+/venv/
+/.venv/
+/data/
+/models/
+/notebooks/
+/hpc_logs/
+/.git/
+/.claude/
+/node_modules/
+/scripts/
+/docs/
+/tests/
+
+# Large binary files
 *.pkl
 *.npy
 *.pt
@@ -33,10 +35,12 @@ tests/
 *.tar
 *.tar.gz
 *.tgz
-Dockerfile*
-.dockerignore
-hpc_status.py
-requirements*.txt
+
+# Misc root files
+/Dockerfile*
+/.dockerignore
+/hpc_status.py
+/requirements*.txt
 *.ipynb
 
 # Exclude frontend node_modules (Vercel installs deps itself)
