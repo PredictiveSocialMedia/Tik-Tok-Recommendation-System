@@ -16,9 +16,11 @@ export function LoginPage() {
 
     try {
       if (mode === "signup") {
+        const redirectTo = `${window.location.origin}/`;
         const { error: signUpError } = await supabase.auth.signUp({
           email: email.trim(),
           password,
+          options: { emailRedirectTo: redirectTo },
         });
         if (signUpError) {
           setError(signUpError.message);
