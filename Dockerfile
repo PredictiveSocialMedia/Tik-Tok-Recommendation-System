@@ -64,7 +64,28 @@ from sentence_transformers import SentenceTransformer; \
 m = SentenceTransformer('all-MiniLM-L6-v2'); \
 print('SentenceTransformer loaded, dim:', m.get_sentence_embedding_dimension())"
 
-# Verify all models load in offline mode (catches cache misses at build time)
+# Copy source code and ensure package is importable
+COPY src/ ./src/
+RUN touch ./src/__init__.py
+
+# Copy serve script
+COPY scripts/serve_recommender.py ./scripts/serve_recommender.py
+
+# Download recommender artifacts from HuggingFace at build time (BEFORE offline mode)
+RUN python -c "\
+from huggingface_hub import snapshot_download; \
+snapshot_download( \
+    repo_id='JSebastianIEU/tiktok-repo', \
+    repo_type='model', \
+    local_dir='.', \
+    allow_patterns=[ \
+        'artifacts/recommender/20260414T050542Z-phase2-bootstrap-feedback/**', \
+        'artifacts/contracts/f0119270fe1433f1adea9f41fbfd6eae66124c85ec9618619d0646ae29858bce/bundle.json', \
+        'artifacts/hashtag_recommender/**', \
+    ] \
+)"
+
+# NOW set offline mode and verify ML models load without network
 ENV HF_HUB_OFFLINE=1
 ENV TRANSFORMERS_OFFLINE=1
 ENV HF_DATASETS_OFFLINE=1
@@ -79,27 +100,6 @@ print('OFFLINE OK: BLIP'); \
 from keybert import KeyBERT; \
 KeyBERT('paraphrase-multilingual-MiniLM-L12-v2'); \
 print('OFFLINE OK: KeyBERT')"
-
-# Copy source code and ensure package is importable
-COPY src/ ./src/
-RUN touch ./src/__init__.py
-
-# Copy serve script
-COPY scripts/serve_recommender.py ./scripts/serve_recommender.py
-
-# Download recommender artifacts from HuggingFace at build time
-RUN python -c "\
-from huggingface_hub import snapshot_download; \
-snapshot_download( \
-    repo_id='JSebastianIEU/tiktok-repo', \
-    repo_type='model', \
-    local_dir='.', \
-    allow_patterns=[ \
-        'artifacts/recommender/20260414T050542Z-phase2-bootstrap-feedback/**', \
-        'artifacts/contracts/f0119270fe1433f1adea9f41fbfd6eae66124c85ec9618619d0646ae29858bce/bundle.json', \
-        'artifacts/hashtag_recommender/**', \
-    ] \
-)"
 
 # Environment
 ENV RECOMMENDER_BUNDLE_DIR=artifacts/recommender/20260414T050542Z-phase2-bootstrap-feedback
