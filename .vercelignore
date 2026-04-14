@@ -1,6 +1,6 @@
 # Everything except what Vercel needs
 artifacts/
-src/
+/src/
 scraper/
 eda/
 diagnostics/
