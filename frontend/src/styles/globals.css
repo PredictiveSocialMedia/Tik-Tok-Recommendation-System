@@ -4371,3 +4371,4 @@ button.comp-card-body:focus-visible {
 
 @keyframes auth-spin {
   to { transform: rotate(360deg); }
+}
