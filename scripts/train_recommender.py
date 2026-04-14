@@ -7,6 +7,7 @@ import argparse
 import json
 import sys
 import time
+import tempfile
 from pathlib import Path
 
 import mlflow
@@ -252,6 +253,17 @@ def main() -> int:
         bundle_dir = Path(result["bundle_dir"])
         mlflow.log_param("bundle_dir", str(bundle_dir))
         mlflow.log_param("bundle_name", bundle_dir.name)
+
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".json",
+            delete=False,
+            encoding="utf-8",
+        ) as tmp_file:
+            json.dump(to_jsonable(result), tmp_file, indent=2, ensure_ascii=False)
+            tmp_path = tmp_file.name
+
+        mlflow.log_artifact(tmp_path, artifact_path="training")
     bundle_dir = Path(result["bundle_dir"])
     latest_link = args.artifact_root / "latest"
     if latest_link.exists() or latest_link.is_symlink():
