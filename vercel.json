@@ -22,6 +22,10 @@
     {
       "source": "/suggest-description",
       "destination": "/api/suggest-description"
+    },
+    {
+      "source": "/thumbnail",
+      "destination": "/api/thumbnail"
     }
   ]
 }
