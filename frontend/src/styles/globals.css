@@ -33,13 +33,14 @@ body {
   color: var(--text-main);
   font-family: "Outfit", "Segoe UI", sans-serif;
   background: var(--bg-primary);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .app-shell {
   position: relative;
-  height: 100vh;
-  overflow: hidden;
+  min-height: 100vh;
+  overflow-x: hidden;
   background:
     radial-gradient(900px 700px at 12% 88%, rgba(180, 80, 210, 0.34), transparent 65%),
     radial-gradient(500px 500px at 83% 6%, rgba(132, 101, 236, 0.24), transparent 60%),
@@ -241,8 +242,8 @@ body {
   z-index: 2;
   width: calc(100% - 88px);
   margin-left: 72px;
-  height: 100vh;
-  padding: 110px 16px 20px;
+  min-height: 100vh;
+  padding: 110px 16px 40px;
   display: flex;
   justify-content: center;
   align-items: center;
