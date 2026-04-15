@@ -1,0 +1,117 @@
+name: Model Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_dir:
+        description: "Recommender bundle directory to evaluate"
+        required: false
+        default: "artifacts/recommender/latest"
+  # Triggered automatically after weekly training completes
+  workflow_run:
+    workflows: ["Weekly Model Training"]
+    types: [completed]
+
+concurrency:
+  group: model-validation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    # Only run if training succeeded (or manual trigger)
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    timeout-minutes: 60
+    env:
+      PYTHONPATH: .
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-training.txt
+
+      - name: Download training artifacts
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: training-artifacts-${{ github.event.workflow_run.id }}
+          path: artifacts/
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Resolve bundle directory
+        id: bundle
+        run: |
+          BUNDLE="${{ github.event.inputs.bundle_dir || 'artifacts/recommender/latest' }}"
+          if [ -L "$BUNDLE" ]; then
+            BUNDLE=$(readlink -f "$BUNDLE")
+          fi
+          echo "dir=$BUNDLE" >> "$GITHUB_OUTPUT"
+          echo "Evaluating bundle: $BUNDLE"
+
+      - name: Run recommender evaluation
+        run: |
+          if [ ! -f scripts/eval_recommender.py ]; then
+            echo "eval_recommender.py not found — skipping"
+            exit 0
+          fi
+          python scripts/eval_recommender.py \
+            --bundle-dir "${{ steps.bundle.outputs.dir }}" \
+            2>&1 | tee /tmp/eval_recommender.log || true
+
+      - name: Run retriever evaluation
+        run: |
+          if [ ! -f scripts/eval_retriever.py ]; then
+            echo "eval_retriever.py not found — skipping"
+            exit 0
+          fi
+          python scripts/eval_retriever.py \
+            --bundle-dir "${{ steps.bundle.outputs.dir }}" \
+            2>&1 | tee /tmp/eval_retriever.log || true
+
+      - name: Run drift monitor
+        run: |
+          if [ ! -f scripts/run_drift_monitor.py ]; then
+            echo "run_drift_monitor.py not found — skipping"
+            exit 0
+          fi
+          python scripts/run_drift_monitor.py \
+            2>&1 | tee /tmp/drift_monitor.log || true
+
+      - name: Summarize results
+        run: |
+          echo "=== Evaluation Summary ==="
+          echo ""
+          echo "--- Recommender ---"
+          tail -20 /tmp/eval_recommender.log 2>/dev/null || echo "(no output)"
+          echo ""
+          echo "--- Retriever ---"
+          tail -20 /tmp/eval_retriever.log 2>/dev/null || echo "(no output)"
+          echo ""
+          echo "--- Drift Monitor ---"
+          tail -20 /tmp/drift_monitor.log 2>/dev/null || echo "(no output)"
+
+      - name: Upload evaluation results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-results-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: ignore
+          path: |
+            /tmp/eval_recommender.log
+            /tmp/eval_retriever.log
+            /tmp/drift_monitor.log
+            artifacts/eval/

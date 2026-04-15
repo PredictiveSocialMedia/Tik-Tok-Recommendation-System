@@ -1,0 +1,90 @@
+name: Daily Corpus Refresh
+
+on:
+  workflow_dispatch:
+    inputs:
+      promote_latest:
+        description: "Promote new bundle to 'latest' symlink"
+        required: false
+        type: boolean
+        default: true
+  schedule:
+    # Daily at 10 AM UTC — runs after scraper (7 AM) and comments (9 AM)
+    - cron: "0 10 * * *"
+
+concurrency:
+  group: corpus-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: .
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      CORPUS_REFRESH_ENABLED: ${{ vars.CORPUS_REFRESH_ENABLED || 'true' }}
+
+    steps:
+      - name: Skip if schedule disabled
+        if: github.event_name == 'schedule' && env.CORPUS_REFRESH_ENABLED != 'true'
+        run: |
+          echo "Scheduled corpus refresh is disabled (set CORPUS_REFRESH_ENABLED=true to enable)."
+          exit 0
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-base.txt
+
+      - name: Validate required secrets
+        run: |
+          test -n "$DATABASE_URL" || (echo "Missing secret DATABASE_URL" && exit 1)
+
+      - name: Export contract bundle from Supabase
+        run: |
+          python scripts/export_db_contract_bundle.py \
+            --db-url "$DATABASE_URL" \
+            --output-dir artifacts/contracts \
+            2>&1 | tee /tmp/corpus_refresh.log
+
+      - name: Validate export
+        run: |
+          BUNDLE=$(find artifacts/contracts -name "bundle.json" -newer /tmp/corpus_refresh.log -type f | head -1)
+          if [ -z "$BUNDLE" ]; then
+            # Fall back to latest
+            BUNDLE=$(find artifacts/contracts -name "bundle.json" -type f | sort -r | head -1)
+          fi
+          if [ -z "$BUNDLE" ]; then
+            echo "ERROR: No bundle.json found after export"
+            exit 1
+          fi
+          echo "Bundle: $BUNDLE"
+          python -c "
+          import json, sys
+          b = json.load(open('$BUNDLE'))
+          videos = len(b.get('videos', b.get('items', [])))
+          print(f'Bundle OK: {videos} videos')
+          if videos == 0:
+              print('WARNING: Empty bundle!')
+              sys.exit(1)
+          "
+
+      - name: Upload corpus artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-bundle-${{ github.run_id }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            artifacts/contracts/
+            /tmp/corpus_refresh.log

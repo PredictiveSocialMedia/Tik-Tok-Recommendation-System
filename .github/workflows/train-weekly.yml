@@ -1,0 +1,167 @@
+name: Weekly Model Training
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_backfill:
+        description: "Skip hashtag bridge backfill"
+        required: false
+        type: boolean
+        default: false
+      skip_comments:
+        description: "Skip comment intelligence step"
+        required: false
+        type: boolean
+        default: false
+      skip_calibration:
+        description: "Skip fabric calibration step"
+        required: false
+        type: boolean
+        default: false
+      skip_phase2_feedback:
+        description: "Phase 2 from bootstrap only (no feedback tables)"
+        required: false
+        type: boolean
+        default: false
+      phase2_feedback_limit:
+        description: "Max requests for Phase 2 implicit-feedback pairs"
+        required: false
+        default: "5000"
+  schedule:
+    # Every Sunday at 3 AM UTC (after a full week of scraper data)
+    - cron: "0 3 * * 0"
+
+concurrency:
+  group: model-training
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      PYTHONPATH: .
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      TRAINING_SCHEDULE_ENABLED: ${{ vars.TRAINING_SCHEDULE_ENABLED || 'true' }}
+
+    steps:
+      - name: Skip if schedule disabled
+        if: github.event_name == 'schedule' && env.TRAINING_SCHEDULE_ENABLED != 'true'
+        run: |
+          echo "Scheduled training is disabled (set TRAINING_SCHEDULE_ENABLED=true to enable)."
+          exit 0
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-training.txt
+
+      - name: Validate required secrets
+        run: |
+          test -n "$DATABASE_URL" || (echo "Missing secret DATABASE_URL" && exit 1)
+
+      - name: Resolve parameters
+        id: params
+        run: |
+          echo "skip_backfill=${{ github.event.inputs.skip_backfill || 'false' }}" >> "$GITHUB_OUTPUT"
+          echo "skip_comments=${{ github.event.inputs.skip_comments || 'false' }}" >> "$GITHUB_OUTPUT"
+          echo "skip_calibration=${{ github.event.inputs.skip_calibration || 'false' }}" >> "$GITHUB_OUTPUT"
+          echo "skip_phase2_feedback=${{ github.event.inputs.skip_phase2_feedback || 'false' }}" >> "$GITHUB_OUTPUT"
+          echo "phase2_feedback_limit=${{ github.event.inputs.phase2_feedback_limit || '5000' }}" >> "$GITHUB_OUTPUT"
+          echo "as_of_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Run full training pipeline
+        run: |
+          set -euo pipefail
+          CMD=(python scripts/train_full_pipeline.py
+            --artifact-root artifacts
+            --as-of-time "${{ steps.params.outputs.as_of_time }}"
+            --phase2-feedback-limit "${{ steps.params.outputs.phase2_feedback_limit }}")
+
+          if [ "${{ steps.params.outputs.skip_backfill }}" = "true" ]; then
+            CMD+=(--skip-backfill)
+          fi
+          if [ "${{ steps.params.outputs.skip_comments }}" = "true" ]; then
+            CMD+=(--skip-comments)
+          fi
+          if [ "${{ steps.params.outputs.skip_calibration }}" = "true" ]; then
+            CMD+=(--skip-calibration)
+          fi
+          if [ "${{ steps.params.outputs.skip_phase2_feedback }}" = "true" ]; then
+            CMD+=(--skip-phase2-feedback)
+          fi
+
+          printf 'Running: %s\n' "${CMD[*]}"
+          "${CMD[@]}" 2>&1 | tee /tmp/training_output.log
+
+      - name: Train hashtag recommender
+        run: |
+          python scripts/train_hashtag_recommender.py \
+            --output artifacts/hashtag_recommender \
+            --batch-size 64 2>&1 | tee -a /tmp/training_output.log
+
+      - name: Validate artifacts
+        run: |
+          echo "--- Recommender bundle ---"
+          ls -la artifacts/recommender/latest/ || echo "No latest symlink"
+          test -f artifacts/recommender/latest/manifest.json && echo "manifest.json OK" || echo "WARNING: no manifest.json"
+
+          echo "--- Hashtag recommender ---"
+          ls -la artifacts/hashtag_recommender/
+          test -f artifacts/hashtag_recommender/faiss.index && echo "faiss.index OK" || echo "WARNING: no faiss.index"
+          test -f artifacts/hashtag_recommender/meta.json && echo "meta.json OK" || echo "WARNING: no meta.json"
+
+          echo "--- Pipeline report ---"
+          if [ -f artifacts/pipeline_report.json ]; then
+            python -c "import json; r=json.load(open('artifacts/pipeline_report.json')); print('Pipeline steps:', len(r.get('steps',[])), '| Status:', r.get('status','unknown'))"
+          fi
+
+      - name: Upload training artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: training-artifacts-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            artifacts/recommender/latest/
+            artifacts/hashtag_recommender/
+            artifacts/pipeline_report.json
+            artifacts/contracts/latest_supabase_bundle.json
+            /tmp/training_output.log
+
+      - name: Upload artifacts to HuggingFace
+        if: success()
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "HF_TOKEN not set — skipping HuggingFace upload. Artifacts saved as GitHub Actions artifact only."
+            exit 0
+          fi
+          pip install huggingface_hub
+          python -c "
+          from huggingface_hub import HfApi
+          api = HfApi()
+          api.upload_folder(
+              folder_path='artifacts',
+              repo_id='JSebastianIEU/tiktok-repo',
+              repo_type='model',
+              path_in_repo='artifacts',
+              allow_patterns=[
+                  'recommender/latest/**',
+                  'hashtag_recommender/**',
+                  'contracts/latest_supabase_bundle.json',
+                  'pipeline_report.json',
+              ],
+          )
+          print('Artifacts uploaded to HuggingFace.')
+          "
