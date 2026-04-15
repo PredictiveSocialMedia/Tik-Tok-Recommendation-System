@@ -15,11 +15,11 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 
-# Data & scraper
-scraper/
-eda/
-data/
-notebooks/
+# Data & scraper (root-scoped to avoid excluding src/data/)
+/scraper/
+/eda/
+/data/
+/notebooks/
 
 # Docs & notebooks
 *.md

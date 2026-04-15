@@ -235,3 +235,9 @@ artifacts/recommender/*/trajectory/
 data/real/
 frontend/.env.local
 .vite/
+artifacts/recommender/*/diagnostics/
+
+.vercel
+report.tex
+individualreport.tex
+eda_report.html
