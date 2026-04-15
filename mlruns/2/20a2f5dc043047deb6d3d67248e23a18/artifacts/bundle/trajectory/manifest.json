@@ -1,0 +1,28 @@
+{
+  "version": "trajectory.v2",
+  "trajectory_manifest_id": "159a30a764bc498c",
+  "trajectory_schema_hash": "28fc85f9375eac3e2337d211843896b6a7b5761da8e21ba3ec1d0b508e93d87b",
+  "created_at": "2026-04-14T18:00:14.959082Z",
+  "config": {
+    "windows_hours": [
+      6,
+      24,
+      96
+    ],
+    "embedding_dim": 16,
+    "feature_version": "trajectory_features.v2",
+    "encoder_mode": "feature_only"
+  },
+  "tables": {
+    "profiles": {
+      "format": "parquet",
+      "path": "profiles.parquet"
+    },
+    "embeddings": {
+      "format": "parquet",
+      "path": "embeddings.parquet"
+    }
+  },
+  "profile_count": 50,
+  "embedding_count": 50
+}
