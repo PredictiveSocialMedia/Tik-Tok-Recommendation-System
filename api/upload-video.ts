@@ -10,6 +10,17 @@ interface UploadJsonBody {
   file_name?: string;
   file_type?: string;
   file_size?: number;
+  description?: string;
+  hashtags?: string[];
+  content_type?: string;
+}
+
+interface ContentAnalysis {
+  caption: string;
+  transcript: string;
+  keywords: string[];
+  topics: string[];
+  suggested_hashtags: string[];
 }
 
 function collectBody(req: VercelRequest): Promise<Buffer> {
@@ -21,8 +32,30 @@ function collectBody(req: VercelRequest): Promise<Buffer> {
   });
 }
 
-async function generateCaption(fileName: string): Promise<string> {
-  if (!DEEPSEEK_API_KEY) return "";
+async function analyzeContent(
+  fileName: string,
+  description: string,
+  hashtags: string[],
+  contentType: string
+): Promise<ContentAnalysis> {
+  const empty: ContentAnalysis = {
+    caption: "",
+    transcript: description,
+    keywords: [],
+    topics: [],
+    suggested_hashtags: hashtags,
+  };
+
+  if (!DEEPSEEK_API_KEY) return empty;
+
+  const userInputs = [
+    `File name: ${fileName}`,
+    description ? `User description: ${description}` : null,
+    hashtags.length ? `User hashtags: ${hashtags.join(", ")}` : null,
+    contentType ? `Content type: ${contentType}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   try {
     const resp = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
@@ -33,30 +66,48 @@ async function generateCaption(fileName: string): Promise<string> {
       },
       body: JSON.stringify({
         model: DEEPSEEK_MODEL,
-        temperature: 0.5,
-        max_tokens: 200,
+        temperature: 0.3,
+        max_tokens: 400,
         messages: [
           {
             role: "system",
             content:
-              "You are a TikTok content strategist. Given a video file name, " +
-              "write a short, engaging TikTok caption (1-2 sentences) that guesses " +
-              "what the video might be about based on the file name. Be creative but plausible. " +
-              "Do NOT include hashtags. No emojis. Plain text only.",
+              "You are a TikTok content analyst. Given a video's filename and any user-provided metadata, " +
+              "extract structured content signals. Return valid JSON only — no markdown, no explanation.\n" +
+              "Schema: { \"caption\": string, \"transcript\": string, \"keywords\": string[], \"topics\": string[], \"suggested_hashtags\": string[] }\n" +
+              "- caption: 1-2 sentence description of what the video is about\n" +
+              "- transcript: a natural language summary of the likely spoken/visual content (2-3 sentences)\n" +
+              "- keywords: 5-10 specific content keywords (no hashtag symbol)\n" +
+              "- topics: 2-4 broad topic categories (e.g. fitness, cooking, travel)\n" +
+              "- suggested_hashtags: 5-8 relevant hashtags including # symbol",
           },
-          { role: "user", content: `File name: ${fileName}` },
+          { role: "user", content: userInputs },
         ],
       }),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(20000),
     });
 
-    if (!resp.ok) return "";
+    if (!resp.ok) return empty;
+
     const data = (await resp.json()) as {
       choices: { message: { content: string } }[];
     };
-    return data.choices?.[0]?.message?.content?.trim() ?? "";
+    const raw = data.choices?.[0]?.message?.content?.trim() ?? "";
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return empty;
+
+    const parsed = JSON.parse(jsonMatch[0]) as Partial<ContentAnalysis>;
+    return {
+      caption: typeof parsed.caption === "string" ? parsed.caption : empty.caption,
+      transcript: typeof parsed.transcript === "string" ? parsed.transcript : description,
+      keywords: Array.isArray(parsed.keywords) ? parsed.keywords.map(String) : [],
+      topics: Array.isArray(parsed.topics) ? parsed.topics.map(String) : [],
+      suggested_hashtags: Array.isArray(parsed.suggested_hashtags)
+        ? parsed.suggested_hashtags.map(String)
+        : hashtags,
+    };
   } catch {
-    return "";
+    return empty;
   }
 }
 
@@ -78,13 +129,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const contentType = (req.headers["content-type"] ?? "").toString().toLowerCase();
 
+  let description = "";
+  let hashtags: string[] = [];
+  let videoContentType = "";
+
   if (contentType.includes("application/json")) {
-    // New path: small JSON payload with metadata only
     try {
       const raw = await collectBody(req);
       const jsonBody = JSON.parse(raw.toString("utf-8")) as UploadJsonBody;
       if (jsonBody.file_name) fileName = jsonBody.file_name;
       if (jsonBody.file_type) fileType = jsonBody.file_type;
+      if (typeof jsonBody.description === "string") description = jsonBody.description;
+      if (Array.isArray(jsonBody.hashtags)) hashtags = jsonBody.hashtags.map(String);
+      if (typeof jsonBody.content_type === "string") videoContentType = jsonBody.content_type;
     } catch {
       return res.status(400).json({ error: "Invalid JSON body." });
     }
@@ -98,19 +155,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const assetId = randomUUID();
-  const caption = await generateCaption(fileName);
+  const analysis = await analyzeContent(fileName, description, hashtags, videoContentType);
 
-  // Return a minimal analysis result matching VideoAnalysisResult
   return res.status(201).json({
     asset_id: assetId,
     file_name: fileName,
     file_type: fileType,
     duration_seconds: null,
-    video_caption: caption || null,
-    transcript: null,
+    video_caption: analysis.caption || null,
+    transcript: analysis.transcript || null,
     ocr_text: null,
     visual_features: null,
     timeline: null,
+    signal_hints: {
+      transcript_text: analysis.transcript || description || undefined,
+      video_caption: analysis.caption || undefined,
+      keywords: analysis.keywords,
+      topics: analysis.topics,
+      suggested_hashtags: analysis.suggested_hashtags,
+    },
     asset: {
       asset_id: assetId,
       original_filename: fileName,

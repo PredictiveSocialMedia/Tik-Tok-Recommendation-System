@@ -137,25 +137,45 @@ export class ApiVideoAnalysisService implements IVideoAnalysisService {
       return cloudResult;
     }
 
-    // Fallback: Vercel serverless (metadata-only, caption from DeepSeek)
+    // Fallback: local Express server (send actual bytes) or Vercel (send JSON metadata)
     const fileName = request.file.name;
-    const fileType = request.file.type || "application/octet-stream";
+    const fileType = request.file.type || "video/mp4";
+    const isVercel = window.location.hostname.endsWith(".vercel.app") ||
+      window.location.hostname.endsWith(".vercel.sh");
     let response: Response;
 
     try {
-      response = await fetch(UPLOAD_ANALYSIS_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-file-name": fileName,
-          "x-file-type": fileType
-        },
-        body: JSON.stringify({
-          file_name: fileName,
-          file_type: fileType,
-          file_size: request.file.size
-        })
-      });
+      if (isVercel) {
+        // Vercel serverless can't handle large binaries — send metadata only
+        response = await fetch(UPLOAD_ANALYSIS_API_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-file-name": fileName,
+            "x-file-type": fileType
+          },
+          body: JSON.stringify({
+            file_name: fileName,
+            file_type: fileType,
+            file_size: request.file.size,
+            description: request.description ?? "",
+            hashtags: request.hashtags ?? [],
+            content_type: request.content_type ?? "",
+          })
+        });
+      } else {
+        // Local Express server — send actual video bytes for real analysis
+        const fileBytes = await request.file.arrayBuffer();
+        response = await fetch(UPLOAD_ANALYSIS_API_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "x-file-name": fileName,
+            "x-file-type": fileType
+          },
+          body: fileBytes
+        });
+      }
     } catch {
       throw new Error("Could not reach the upload analysis service.");
     }

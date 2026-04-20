@@ -1,6 +1,7 @@
-import { FFPROBE_BIN, UPLOAD_ANALYZER_PROVIDER } from "../config";
+import { FFPROBE_BIN, RECOMMENDER_BASE_URL, UPLOAD_ANALYZER_PROVIDER } from "../config";
 import type { AssetAnalysisProvider } from "./contracts";
 import { createBaselineAssetAnalysisProvider } from "./providers/baselineAssetAnalyzer";
+import { PythonAssetAnalysisProvider } from "./providers/pythonAssetAnalyzer";
 
 interface CreateUploadAnalysisProviderOptions {
   provider?: string;
@@ -12,14 +13,21 @@ export function createUploadAnalysisProvider(
 ): AssetAnalysisProvider {
   const provider = (options.provider ?? UPLOAD_ANALYZER_PROVIDER).trim().toLowerCase();
 
+  const baseline = createBaselineAssetAnalysisProvider({
+    ffprobeBin: options.ffprobeBin ?? FFPROBE_BIN
+  });
+
   if (provider === "baseline") {
-    return createBaselineAssetAnalysisProvider({
-      ffprobeBin: options.ffprobeBin ?? FFPROBE_BIN
-    });
+    return baseline;
   }
 
-  // Future: e.g. `python` / `remote` provider returning AssetAnalysisResult with
-  // transcript, timeline, visual_features (see uploads/contracts.ts).
+  if (provider === "python") {
+    return new PythonAssetAnalysisProvider({
+      pythonBaseUrl: RECOMMENDER_BASE_URL,
+      timeoutMs: 120_000,
+      fallback: baseline
+    });
+  }
 
   throw new Error(`Unsupported upload analysis provider: ${provider}`);
 }

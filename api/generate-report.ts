@@ -117,7 +117,8 @@ function scoreCandidate(
   const w = objectiveWeights(objective);
   const semantic = cosineSimilarityWords(description, rec.caption);
   const hashtagSim = textOverlap(hashtags, rec.hashtags ?? []);
-  const intent = hashtagSim * 0.6 + semantic * 0.4;
+  const hashtagWeight = semantic < 0.2 ? 0.8 : 0.5;
+  const intent = hashtagSim * hashtagWeight + semantic * (1 - hashtagWeight);
   const maxViews = 1e7;
   const perf = Math.min(
     1,
@@ -864,9 +865,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   scored.sort((a, b) => b.similarity - a.similarity);
 
   // Filter out very low relevance candidates — don't return garbage matches
-  const MIN_SCORE = 0.15;
+  const MIN_SCORE = 0.10;
   const relevant = scored.filter((c) => c.similarity >= MIN_SCORE);
-  const top = (relevant.length >= 3 ? relevant : scored).slice(0, 10);
+  const top = relevant.length >= 3 ? relevant.slice(0, 10) : relevant.slice(0, 5);
 
   let report = buildReport(
     { description, hashtags, mentions, objective, content_type: contentType },

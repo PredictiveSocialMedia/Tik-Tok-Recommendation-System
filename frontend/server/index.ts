@@ -604,9 +604,55 @@ function buildUploadedAssetQueryPayload(params: {
   signalHints?: Record<string, unknown>;
 }): RecommenderQueryPayload {
   const asset = params.assetRecord.asset;
+  const record = params.assetRecord;
+
+  // Strip BLIP template prefix ("a tiktok video showing ") from caption segments
+  function cleanCaption(raw: string | undefined): string {
+    if (!raw) return "";
+    return raw
+      .split("|")
+      .map((s) => s.trim().replace(/^a tiktok video showing\s*/i, "").trim())
+      .filter(Boolean)
+      .join(", ");
+  }
+
+  // When the user didn't fill the form, fall back to ML-extracted signals
+  const effectiveDescription =
+    params.description.trim() ||
+    cleanCaption(record.video_caption) ||
+    "";
+
+  // Filter out baseline-generated technical tags and BLIP/YAKE template noise
+  const QUERY_NOISE = new Set([
+    "portrait framing", "landscape framing", "square framing", "unknown framing",
+    "steady pacing", "fast-cut pacing", "balanced pacing", "slow pacing",
+    "audio-backed delivery", "silent-first playback",
+    "high-definition render", "full-frame export", "compressed export",
+    "high visual motion", "moderate visual motion", "low visual motion",
+    "tiktok video", "video showing", "tiktok", "video",
+  ]);
+  const mlKeyTopics = (record.analysis.keyTopics ?? [])
+    .filter((t) => !QUERY_NOISE.has(t.toLowerCase()));
+
+  const effectiveHashtags =
+    params.hashtags.length > 0
+      ? params.hashtags
+      : mlKeyTopics.map((t) => `#${t}`);
+
+  // Enrich signal_hints with transcript/ocr from the asset record
+  // so buildRecommenderQueryPayload can include them in the query text
+  const enrichedSignalHints: Record<string, unknown> = {
+    ...(params.signalHints ?? {}),
+    ...(record.transcript?.trim()
+      ? { transcript_text: record.transcript.trim() }
+      : {}),
+    ...(record.ocr_text?.trim()
+      ? { ocr_text: record.ocr_text.trim() }
+      : {}),
+  };
+
   const additionalTextFragments = [
     asset.orientation !== "unknown" ? `${asset.orientation} video` : "",
-    asset.has_audio ? "audio track present" : "silent video",
     typeof asset.duration_seconds === "number"
       ? `${Math.round(asset.duration_seconds)} second clip`
       : ""
@@ -614,20 +660,21 @@ function buildUploadedAssetQueryPayload(params: {
 
   return buildRecommenderQueryPayload({
     queryId: params.assetRecord.asset_id,
-    description: params.description,
-    hashtags: params.hashtags,
+    description: effectiveDescription,
+    hashtags: effectiveHashtags,
     mentions: params.mentions,
     audience: params.audience,
     primaryCta: params.primaryCta,
-    language: params.language,
+    language: params.language ?? record.detected_language ?? undefined,
     locale: params.locale,
     contentType: params.contentType,
     asOfTimeIso: params.asOfTimeIso,
-    signalHints: params.signalHints,
+    signalHints: enrichedSignalHints,
     additionalTextFragments,
     topicKey:
-      params.hashtags[0]?.replace(/^#/, "") ||
+      effectiveHashtags[0]?.replace(/^#/, "") ||
       params.contentType?.trim().toLowerCase() ||
+      mlKeyTopics[0] ||
       "uploaded_asset"
   });
 }

@@ -1511,6 +1511,20 @@ class RecommenderRuntime:
         retrieval_started = time.perf_counter()
         shortlist: List[Dict[str, Any]] = []
         if self.retriever is not None:
+            query_fabric_dict: Dict[str, Any] = {}
+            try:
+                query_fabric_out = self.fabric.extract({
+                    "video_id": str(query_profile.get("query_id") or "query"),
+                    "as_of_time": as_of.isoformat(),
+                    "caption": str(query.get("description") or query_profile.get("raw_text") or ""),
+                    "hashtags": list(query_profile.get("hashtags") or []),
+                    "keywords": list(query_profile.get("keywords") or []),
+                    "transcript_text": query.get("transcript_text"),
+                    "content_type": query_profile.get("content_type"),
+                })
+                query_fabric_dict = query_fabric_out.model_dump(mode="python")
+            except Exception:
+                pass
             retriever_query = {
                 "row_id": str(query_profile.get("query_id") or "query"),
                 "query_id": str(query_profile.get("query_id") or "query"),
@@ -1525,6 +1539,7 @@ class RecommenderRuntime:
                 "locale": query_profile.get("locale"),
                 "author_id": query.get("author_id"),
                 "as_of_time": as_of,
+                "_fabric_output": query_fabric_dict,
             }
             retrieved_items, retrieval_meta = self.retriever.retrieve(
                 query_row=retriever_query,
