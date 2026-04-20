@@ -48,36 +48,73 @@ function loadDemoData(): DemoRecord[] {
   }
 }
 
-// Real ranker weights from trained model
-const RANKER_WEIGHTS: Record<
-  string,
-  Record<string, number>
-> = {
+// Weights mirror Python baseline_common.py OBJECTIVE_RANKING_WEIGHTS
+const RANKER_WEIGHTS: Record<string, Record<string, number>> = {
   reach: {
-    semantic_relevance: 0.28,
-    intent_alignment: 0.22,
+    semantic_relevance: 0.21,
+    intent_alignment: 0.17,
     performance_quality: 0.25,
-    reference_usefulness: 0.15,
-    support_confidence: 0.1,
+    reference_usefulness: 0.13,
+    support_confidence: 0.08,
+    trajectory_alignment: 0.16,
   },
   engagement: {
-    semantic_relevance: 0.28,
-    intent_alignment: 0.25,
-    performance_quality: 0.22,
-    reference_usefulness: 0.15,
-    support_confidence: 0.1,
+    semantic_relevance: 0.23,
+    intent_alignment: 0.20,
+    performance_quality: 0.18,
+    reference_usefulness: 0.12,
+    support_confidence: 0.09,
+    trajectory_alignment: 0.18,
   },
   conversion: {
-    semantic_relevance: 0.26,
-    intent_alignment: 0.3,
-    performance_quality: 0.2,
-    reference_usefulness: 0.14,
-    support_confidence: 0.1,
+    semantic_relevance: 0.17,
+    intent_alignment: 0.30,
+    performance_quality: 0.12,
+    reference_usefulness: 0.12,
+    support_confidence: 0.12,
+    trajectory_alignment: 0.17,
   },
 };
 
 function objectiveWeights(obj: string) {
   return RANKER_WEIGHTS[obj] ?? RANKER_WEIGHTS.engagement;
+}
+
+/**
+ * Infer trajectory regime probabilities from raw engagement metrics (demo fallback).
+ * Without a real trajectory bundle, high views → spike, high engagement rate → durable.
+ * Returns a trajectory_alignment score in [0, 1].
+ */
+function trajectoryAlignmentScore(rec: DemoRecord, objective: string): number {
+  const views = rec.views ?? 0;
+  const engRate = views > 0
+    ? (rec.likes + rec.comments_count + rec.shares) / views
+    : 0;
+
+  // Normalise on log10 scale: 10M views ≈ 1.0
+  const logViews = views > 0 ? Math.log10(views + 1) / 7 : 0;
+
+  // Soft regime proxies — each in [0, 1], not necessarily summing to 1
+  const spikeProxy = Math.min(1, logViews * 1.3);
+  const durableProxy = Math.min(1, engRate * 12);
+  const balancedProxy = Math.max(0, 1 - spikeProxy * 0.7 - durableProxy * 0.7);
+
+  const total = spikeProxy + durableProxy + balancedProxy || 1;
+  const spike = spikeProxy / total;
+  const durable = durableProxy / total;
+  const balanced = balancedProxy / total;
+
+  let alignment: number;
+  if (objective === "reach") {
+    alignment = spike * 1.0 + balanced * 0.55 + durable * 0.20;
+  } else if (objective === "conversion") {
+    alignment = spike * 0.20 + balanced * 0.60 + durable * 1.0;
+  } else {
+    // engagement (default)
+    alignment = spike * 0.70 + balanced * 1.0 + durable * 0.65;
+  }
+
+  return Math.round(Math.min(1, Math.max(0, alignment)) * 1000) / 1000;
 }
 
 function textOverlap(a: string[], b: string[]): number {
@@ -127,13 +164,15 @@ function scoreCandidate(
   );
   const ref = semantic > 0.3 ? 0.7 + semantic * 0.3 : 0.4;
   const support = hashtagSim > 0.2 ? 0.7 : 0.4;
+  const trajectoryAlignment = trajectoryAlignmentScore(rec, objective);
 
   const score =
     w.semantic_relevance * semantic +
     w.intent_alignment * intent +
     w.performance_quality * perf +
     w.reference_usefulness * ref +
-    w.support_confidence * support;
+    w.support_confidence * support +
+    (w.trajectory_alignment ?? 0) * trajectoryAlignment;
 
   return {
     score: Math.round(score * 1000) / 1000,
@@ -143,6 +182,7 @@ function scoreCandidate(
       performance_quality: Math.round(perf * 1000) / 1000,
       reference_usefulness: Math.round(ref * 1000) / 1000,
       support_confidence: Math.round(support * 1000) / 1000,
+      trajectory_alignment: trajectoryAlignment,
     },
   };
 }
@@ -238,6 +278,7 @@ function buildReport(
     performance_quality: 0,
     reference_usefulness: 0,
     support_confidence: 0,
+    trajectory_alignment: 0,
   };
   for (const c of comparables) {
     for (const k of Object.keys(scoreComponentAvgs) as (keyof typeof scoreComponentAvgs)[]) {

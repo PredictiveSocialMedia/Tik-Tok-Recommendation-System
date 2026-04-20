@@ -22,6 +22,35 @@ from .retrieval_baseline import (
 )
 
 
+def trajectory_alignment_score(objective: str, trajectory_trace: Dict[str, Any]) -> float:
+    """Score how well a candidate's engagement trajectory regime aligns with the query objective.
+
+    Regime semantics:
+      spike   → viral burst; best for reach, mediocre for conversion
+      balanced → steady engagement; good for engagement objective
+      durable  → long-tail evergreen; best for conversion
+
+    When regime_confidence is 0 (no trajectory bundle loaded) the score falls back to
+    neutral 0.5 so it does not bias ranking in the absence of real signal.
+    """
+    probs = trajectory_trace.get("regime_probabilities") or {}
+    spike = sanitize_probability(probs.get("spike"), 0.0)
+    balanced = sanitize_probability(probs.get("balanced"), 0.0)
+    durable = sanitize_probability(probs.get("durable"), 0.0)
+    confidence = sanitize_probability(trajectory_trace.get("regime_confidence"), 0.0)
+
+    if objective == "reach":
+        raw = spike * 1.0 + balanced * 0.55 + durable * 0.20
+    elif objective == "engagement":
+        raw = spike * 0.70 + balanced * 1.0 + durable * 0.65
+    else:  # conversion
+        raw = spike * 0.20 + balanced * 0.60 + durable * 1.0
+
+    # Blend toward neutral (0.5) when confidence is low
+    score = 0.5 + (raw - 0.5) * confidence
+    return round_score(clamp(score, 0.0, 1.0), 6)
+
+
 def support_confidence_score(level: str, score: float) -> float:
     tier_floor = 0.82 if level == "full" else 0.52 if level == "partial" else 0.0
     return round_score(clamp((tier_floor * 0.55) + (score * 0.45), 0.0, 1.0), 6)
@@ -136,6 +165,10 @@ def score_components_for_candidate(
         "support_confidence": support_confidence_score(
             candidate["support_level"], candidate["support_score"]
         ),
+        "trajectory_alignment": trajectory_alignment_score(
+            query_profile.get("objective", "engagement"),
+            candidate.get("trajectory_trace") or {},
+        ),
     }
 
 
@@ -146,6 +179,11 @@ def ranking_reasons(candidate: Dict[str, Any], score_components: Dict[str, float
         reasons.append("multi_branch_retrieval_match")
     if candidate["support_level"] == "full":
         reasons.append("fully_supported_reference")
+    traj = candidate.get("trajectory_trace") or {}
+    conf = float(traj.get("regime_confidence") or 0.0)
+    if conf >= 0.5 and score_components.get("trajectory_alignment", 0.0) >= 0.70:
+        regime = str(traj.get("regime_pred") or "balanced")
+        reasons.append(f"trajectory_regime_{regime}")
     return reasons
 
 

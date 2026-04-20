@@ -45,33 +45,40 @@ SUPPORT_FULL_THRESHOLD = 0.75
 SUPPORT_PARTIAL_THRESHOLD = 0.45
 
 DEFAULT_RANKING_WEIGHTS = {
-    "semantic_relevance": 0.30,
-    "intent_alignment": 0.25,
-    "performance_quality": 0.20,
-    "reference_usefulness": 0.15,
-    "support_confidence": 0.10,
+    "semantic_relevance": 0.25,
+    "intent_alignment": 0.20,
+    "performance_quality": 0.18,
+    "reference_usefulness": 0.13,
+    "support_confidence": 0.08,
+    "trajectory_alignment": 0.16,
 }
 OBJECTIVE_RANKING_WEIGHTS = {
+    # reach: spike regime (viral) is most valuable → trajectory gets a meaningful slice
     "reach": {
-        "semantic_relevance": 0.25,
-        "intent_alignment": 0.20,
-        "performance_quality": 0.30,
-        "reference_usefulness": 0.15,
-        "support_confidence": 0.10,
+        "semantic_relevance": 0.21,
+        "intent_alignment": 0.17,
+        "performance_quality": 0.25,
+        "reference_usefulness": 0.13,
+        "support_confidence": 0.08,
+        "trajectory_alignment": 0.16,
     },
+    # engagement: balanced regime matters most; trajectory weight is highest here
     "engagement": {
-        "semantic_relevance": 0.28,
-        "intent_alignment": 0.25,
-        "performance_quality": 0.22,
-        "reference_usefulness": 0.15,
-        "support_confidence": 0.10,
+        "semantic_relevance": 0.23,
+        "intent_alignment": 0.20,
+        "performance_quality": 0.18,
+        "reference_usefulness": 0.12,
+        "support_confidence": 0.09,
+        "trajectory_alignment": 0.18,
     },
+    # conversion: durable/evergreen regime is key; intent still dominates
     "conversion": {
-        "semantic_relevance": 0.20,
-        "intent_alignment": 0.35,
-        "performance_quality": 0.15,
-        "reference_usefulness": 0.15,
-        "support_confidence": 0.15,
+        "semantic_relevance": 0.17,
+        "intent_alignment": 0.30,
+        "performance_quality": 0.12,
+        "reference_usefulness": 0.12,
+        "support_confidence": 0.12,
+        "trajectory_alignment": 0.17,
     },
 }
 

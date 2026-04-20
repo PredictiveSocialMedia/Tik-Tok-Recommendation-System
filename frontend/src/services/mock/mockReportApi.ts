@@ -349,7 +349,8 @@ export function generateMockReport(
           intent_alignment: clamp(similarity.score - 0.08, 0, 1),
           performance_quality: clamp(similarity.score - 0.06, 0, 1),
           reference_usefulness: clamp(similarity.score - 0.04, 0, 1),
-          support_confidence: 0.72
+          support_confidence: 0.72,
+          trajectory_alignment: clamp(similarity.score - 0.05, 0, 1),
         },
         retrieval_branches: ["lexical", "topic"]
       };
@@ -531,7 +532,8 @@ export function generateMockReport(
             intent_alignment: 0.62,
             performance_quality: 0.55,
             reference_usefulness: 0.66,
-            support_confidence: 0.72
+            support_confidence: 0.72,
+            trajectory_alignment: 0.65,
           }
         },
         contrast_signals: {
