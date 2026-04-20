@@ -194,13 +194,17 @@ def rank_shortlist(
     effective_objective: str,
     portfolio: Optional[Dict[str, Any]],
     rankers_available: Sequence[str],
+    learned_weights: Optional[Dict[str, float]] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     reference_date = max(
         [item["posted_at"] for item in shortlist if isinstance(item.get("posted_at"), datetime)]
         or [datetime.now(timezone.utc)]
     )
-    ranking_weights = OBJECTIVE_RANKING_WEIGHTS.get(
-        effective_objective, DEFAULT_RANKING_WEIGHTS
+    # Prefer learned weights from LambdaRank optimizer; fall back to hardcoded defaults
+    ranking_weights = (
+        learned_weights
+        if isinstance(learned_weights, dict) and learned_weights
+        else OBJECTIVE_RANKING_WEIGHTS.get(effective_objective, DEFAULT_RANKING_WEIGHTS)
     )
     ranked: List[Dict[str, Any]] = []
     for item in shortlist:
@@ -321,6 +325,7 @@ def rank_shortlist(
 
     return ranked, {
         "weights": ranking_weights,
+        "weights_source": "lambdarank" if learned_weights else "hardcoded",
         "portfolio_requested": portfolio_requested,
         "portfolio_supported": portfolio_supported,
         "portfolio_fallback_reason": portfolio_fallback_reason,
