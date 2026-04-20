@@ -30,7 +30,14 @@ from .graph import (
 from .objectives import OBJECTIVE_SPECS, map_objective
 from .policy import PolicyRerankerConfig
 from .query_contract import build_query_profile
-from .ranking_baseline import rank_shortlist
+from .ranker_weight_optimizer import (
+    OPTIMIZER_ID,
+    OPTIMIZER_VERSION,
+    RankerWeightOptimizer,
+    RankingCandidate,
+    RankingGroupExample,
+)
+from .ranking_baseline import rank_shortlist, score_components_for_candidate
 from .retrieval_baseline import retrieve_shortlist
 from .retriever import HybridRetriever, HybridRetrieverTrainerConfig
 from .sampling import NegativeSampler, NegativeSamplerConfig
@@ -857,6 +864,143 @@ def _evaluate_baseline_ranker_objective(
     return evaluate_ranking(query_payloads, k_values=(10, 20))
 
 
+def _collect_ranking_training_examples(
+    *,
+    objective: str,
+    rows_split: Dict[str, List[Dict[str, Any]]],
+    relevance_by_query: Dict[str, Dict[str, float]],
+    retrieve_k: int,
+    max_age_days: int,
+    max_queries: int = 256,
+) -> List[RankingGroupExample]:
+    """
+    For each validation query, retrieve candidates and compute score_components
+    via the baseline ranker. Returns RankingGroupExample objects ready for
+    LambdaRank optimisation.
+    """
+    pool_builder = TemporalCandidatePool(
+        TemporalCandidatePoolConfig(
+            max_age_days=max_age_days,
+            min_pool_size=30,
+            enforce_index_cutoff=True,
+        )
+    )
+    from datetime import timezone as _tz
+
+    groups: List[RankingGroupExample] = []
+    candidate_rows = rows_split["train"] + rows_split["validation"]
+
+    for query_row in (rows_split["validation"] + rows_split["test"])[:max_queries]:
+        query_id = str(query_row.get("row_id") or "")
+        if not query_id:
+            continue
+        relevance = relevance_by_query.get(query_id, {})
+        if not relevance:
+            continue
+        query_as_of = parse_dt(query_row.get("as_of_time"))
+        if query_as_of is None:
+            continue
+
+        query_payload = _row_query_payload(query_row)
+        query_profile = build_query_profile(
+            objective=objective,
+            query=query_payload,
+            fallback_language=query_payload.get("language"),
+            fallback_locale=query_payload.get("locale"),
+            fallback_content_type=query_payload.get("content_type"),
+        )
+
+        pool = pool_builder.for_query(
+            query_row=query_row,
+            candidate_rows=candidate_rows,
+            index_cutoff_time=query_row.get("as_of_time"),
+        )
+        prepared: List[Dict[str, Any]] = []
+        for candidate_row in pool:
+            cand = prepare_candidate(
+                payload=_row_candidate_payload(candidate_row),
+                as_of=query_as_of,
+                query_profile=query_profile,
+                manifest_comment_lookup=lambda _rid, _pit: None,
+            )
+            if cand is None or cand.get("support_level") == "low":
+                continue
+            prepared.append(cand)
+
+        if len(prepared) < 2:
+            continue
+
+        shortlist, _ = retrieve_shortlist(
+            usable_candidates=prepared,
+            query_profile=query_profile,
+            retrieve_k=retrieve_k,
+        )
+
+        reference_date = max(
+            [c["posted_at"] for c in shortlist if isinstance(c.get("posted_at"), datetime)]
+            or [datetime.now(_tz.utc)]
+        )
+
+        group = RankingGroupExample(query_id=query_id, objective=objective)
+        for cand in shortlist:
+            cand_id = str(cand.get("candidate_id") or "")
+            rel_label = float(relevance.get(cand_id, 0.0))
+            components = score_components_for_candidate(
+                query_profile=query_profile,
+                candidate=cand,
+                reference_date=reference_date,
+            )
+            group.candidates.append(
+                RankingCandidate(
+                    candidate_id=cand_id,
+                    components=components,
+                    relevance_label=rel_label,
+                )
+            )
+
+        if group.n_pairs() > 0:
+            groups.append(group)
+
+    return groups
+
+
+def _train_lambdarank_weights(
+    *,
+    objective: str,
+    rows_split: Dict[str, List[Dict[str, Any]]],
+    relevance_by_query: Dict[str, Dict[str, float]],
+    retrieve_k: int,
+    max_age_days: int,
+    output_dir: Path,
+) -> Dict[str, Any]:
+    """
+    Collect ranking training examples, run LambdaRank optimisation, save artifact.
+    Returns a summary dict for inclusion in the ranker manifest.
+    """
+    groups = _collect_ranking_training_examples(
+        objective=objective,
+        rows_split=rows_split,
+        relevance_by_query=relevance_by_query,
+        retrieve_k=retrieve_k,
+        max_age_days=max_age_days,
+    )
+
+    optimizer = RankerWeightOptimizer()
+    optimizer.train(groups, objectives=[objective])
+    optimizer.save(output_dir / "lambdarank_weights")
+
+    summary = optimizer.train_summary.get(objective, {})
+    logger.info(
+        "[lambdarank] objective=%s status=%s ndcg_before=%.4f ndcg_after=%.4f pairs=%d",
+        objective,
+        summary.get("status"),
+        summary.get("ndcg_before") or 0.0,
+        summary.get("ndcg_after") or 0.0,
+        summary.get("n_pairs") or 0,
+    )
+    return summary
+
+
 def train_recommender_from_datamart(
     datamart: Dict[str, Any],
     artifact_root: Path,
@@ -1195,16 +1339,35 @@ def train_recommender_from_datamart(
 
         ranker_output_dir = rankers_dir / effective_objective
         ranker_output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Train LambdaRank weight optimizer using the same candidate pool and relevance labels
+        lambdarank_summary = _train_lambdarank_weights(
+            objective=effective_objective,
+            rows_split=rows_split,
+            relevance_by_query=relevance_by_query,
+            retrieve_k=cfg.retrieve_k,
+            max_age_days=cfg.max_age_days,
+            output_dir=ranker_output_dir,
+        )
+        lambdarank_weights = lambdarank_summary.get("weights") or OBJECTIVE_RANKING_WEIGHTS.get(
+            effective_objective, DEFAULT_RANKING_WEIGHTS
+        )
+
         baseline_manifest = {
             "ranker_id": "baseline_weighted",
             "version": BASELINE_RANKER_VERSION,
             "objective": effective_objective,
             "feature_schema_hash": ranker_feature_schema_hash,
-            "weights": OBJECTIVE_RANKING_WEIGHTS.get(
-                effective_objective,
-                DEFAULT_RANKING_WEIGHTS,
-            ),
+            # learned weights override hardcoded defaults
+            "weights": lambdarank_weights,
+            "weights_source": lambdarank_summary.get("status", "fallback"),
+            "weights_hardcoded": dict(OBJECTIVE_RANKING_WEIGHTS.get(effective_objective, DEFAULT_RANKING_WEIGHTS)),
             "retriever_blend_weights": selected_retriever_weights,
+            "lambdarank": {
+                "optimizer_id": OPTIMIZER_ID,
+                "optimizer_version": OPTIMIZER_VERSION,
+                "summary": lambdarank_summary,
+            },
         }
         (ranker_output_dir / "baseline_manifest.json").write_text(
             json.dumps(baseline_manifest, indent=2, ensure_ascii=False),
@@ -1220,6 +1383,7 @@ def train_recommender_from_datamart(
             "retriever_ablation": retriever_ablation,
             "retriever_eval": retrieval_eval,
             "ranker_eval": ranker_eval,
+            "lambdarank_summary": lambdarank_summary,
             "pair_row_count": len(objective_pair_rows),
             "pair_target_source": cfg.pair_target_source,
         }

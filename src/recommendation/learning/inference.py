@@ -54,6 +54,7 @@ from .learned_reranker import (
     LEARNED_RERANKER_VERSION,
     LearnedPairwiseReranker,
 )
+from .ranker_weight_optimizer import RankerWeightOptimizer
 from .objectives import map_objective
 from .policy import PolicyReranker, PolicyRerankerConfig
 from .query_contract import build_query_profile
@@ -921,9 +922,20 @@ class RecommenderRuntime:
         }
         self.learned_rerankers: Dict[str, LearnedPairwiseReranker] = {}
         self.learned_reranker_load_warnings: Dict[str, str] = {}
+        self.lambdarank_optimizers: Dict[str, RankerWeightOptimizer] = {}
+        self.lambdarank_load_warnings: Dict[str, str] = {}
         self.calibrators: Dict[str, _IdentityCalibrator] = {}
         self.calibration_load_warnings: Dict[str, str] = {}
         for objective in self.rankers.keys():
+            lr_weights_dir = bundle_dir / "rankers" / objective / "lambdarank_weights"
+            if (lr_weights_dir / "manifest.json").exists():
+                try:
+                    opt = RankerWeightOptimizer.load(lr_weights_dir)
+                    self.lambdarank_optimizers[objective] = opt
+                except Exception as _err:
+                    self.lambdarank_load_warnings[objective] = (
+                        f"lambdarank_load_failed: {_err}"
+                    )
             learned_dir = bundle_dir / "rankers" / objective / "learned_reranker"
             manifest_path = learned_dir / "manifest.json"
             if manifest_path.exists():
@@ -1607,13 +1619,23 @@ class RecommenderRuntime:
             raise RecommenderStageTimeoutError("retrieval", retrieval_elapsed_ms, retrieval_budget_ms)
 
         ranking_started = time.perf_counter()
+        _lr_opt = self.lambdarank_optimizers.get(effective_objective)
+        _lr_weights = _lr_opt.get_weights(effective_objective) if _lr_opt else None
         ranked, ranking_meta = rank_shortlist(
             shortlist=shortlist,
             query_profile=query_profile,
             effective_objective=effective_objective,
             portfolio=portfolio,
             rankers_available=self.rankers.keys(),
+            learned_weights=_lr_weights,
         )
+        lambdarank_metadata: Dict[str, Any] = {
+            "available": effective_objective in self.lambdarank_optimizers,
+            "applied": _lr_weights is not None,
+            "weights_source": ranking_meta.get("weights_source", "hardcoded"),
+            "weights": _lr_weights,
+            "load_warning": self.lambdarank_load_warnings.get(effective_objective),
+        }
         learned_reranker_metadata: Dict[str, Any] = {
             "enabled": effective_objective in self.learned_rerankers,
             "applied": False,
@@ -1895,6 +1917,7 @@ class RecommenderRuntime:
                 "engine": "identity",
             },
             "retrieval_personalization_metadata": retrieval_personalization_metadata,
+            "lambdarank_metadata": lambdarank_metadata,
             "learned_reranker_metadata": learned_reranker_metadata,
             "user_adaptation_metadata": user_adaptation_metadata,
             "policy_version": BASELINE_POLICY_VERSION,
@@ -1941,6 +1964,7 @@ class RecommenderRuntime:
                     "ranking": {
                         "default_weights": DEFAULT_RANKING_WEIGHTS,
                         "objective_weights": OBJECTIVE_RANKING_WEIGHTS,
+                        "lambdarank": lambdarank_metadata,
                         "learned_reranker": learned_reranker_metadata,
                         "user_adaptation": user_adaptation_metadata,
                     },
