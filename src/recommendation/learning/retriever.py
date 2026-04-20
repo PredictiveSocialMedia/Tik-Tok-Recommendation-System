@@ -337,9 +337,9 @@ def _query_audio_motif(query_row: Dict[str, Any]) -> Optional[str]:
     if not isinstance(audio, dict):
         return None
     speech = float(audio.get("speech_ratio") or 0.0)
-    tempo = float(audio.get("tempo") or 0.0)
+    tempo = float(audio.get("tempo_bpm") or 0.0)
     energy = float(audio.get("energy") or 0.0)
-    music = bool(audio.get("music_presence", False))
+    music = (audio.get("music_presence_score") or 0.0) >= 0.5
 
     def _bucket(value: float, lo: float, hi: float) -> str:
         if value < lo:

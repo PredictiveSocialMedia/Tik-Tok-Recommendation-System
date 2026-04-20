@@ -880,6 +880,8 @@ def _generate_video_caption_cpu(frames: List[np.ndarray]) -> Optional[str]:
         indices = np.linspace(0, len(frames) - 1, n, dtype=int)
         captions = []
 
+        _BLIP_PREFIX = "a tiktok video showing "
+
         for idx in indices:
             pil_img = Image.fromarray(frames[int(idx)])
             inputs = processor(
@@ -890,6 +892,9 @@ def _generate_video_caption_cpu(frames: List[np.ndarray]) -> Optional[str]:
             with torch.inference_mode():
                 output_ids = model.generate(**inputs, max_new_tokens=64)
             caption = processor.decode(output_ids[0], skip_special_tokens=True).strip()
+            # Strip the template prefix so we keep only the actual content
+            if caption.lower().startswith(_BLIP_PREFIX):
+                caption = caption[len(_BLIP_PREFIX):].strip()
             if caption and caption not in captions:
                 captions.append(caption)
 

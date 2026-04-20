@@ -40,9 +40,36 @@ export class PythonAssetAnalysisProvider implements AssetAnalysisProvider {
     try {
       const pythonResult = await this.callPythonAnalyzer(asset);
 
-      // Merge: baseline provides asset_updates + signal_hints, Python provides rich data
+      // Merge signal_hints: baseline provides audio/visual numbers,
+      // Python overrides with real measurements and adds transcript_text / ocr_text
+      const mergedSignalHints = {
+        ...baselineResult.signal_hints,
+        ...(pythonResult.signal_hints ?? {}),
+        ...(pythonResult.transcript?.trim()
+          ? { transcript_text: pythonResult.transcript.trim() }
+          : {}),
+        ...(pythonResult.ocr_text?.trim()
+          ? { ocr_text: pythonResult.ocr_text.trim() }
+          : {}),
+      };
+
+      // Override analysis.keyTopics with Python keywords when available
+      const pythonKeywords =
+        Array.isArray(pythonResult.keywords) && pythonResult.keywords.length > 0
+          ? pythonResult.keywords.slice(0, 8)
+          : null;
+      const mergedAnalysis = {
+        ...baselineResult.analysis,
+        ...(pythonKeywords ? { keyTopics: pythonKeywords } : {}),
+        ...(pythonResult.video_caption?.trim()
+          ? { summary: pythonResult.video_caption.trim() }
+          : {}),
+      };
+
       return {
         ...baselineResult,
+        signal_hints: mergedSignalHints as typeof baselineResult.signal_hints,
+        analysis: mergedAnalysis,
         transcript: pythonResult.transcript ?? baselineResult.transcript,
         ocr_text: pythonResult.ocr_text ?? baselineResult.ocr_text,
         video_caption:
