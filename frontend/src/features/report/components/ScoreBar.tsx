@@ -38,6 +38,7 @@ interface ScoreComponentsChartProps {
     performance_quality: number;
     reference_usefulness: number;
     support_confidence: number;
+    trajectory_alignment?: number;
   };
   compact?: boolean;
 }
@@ -46,34 +47,38 @@ const COMPONENT_COLORS: Record<string, string> = {
   semantic_relevance: "linear-gradient(90deg, #a78bfa, #7c3aed)",
   intent_alignment: "linear-gradient(90deg, #67e8f9, #06b6d4)",
   reference_usefulness: "linear-gradient(90deg, #fbbf24, #f59e0b)",
-  support_confidence: "linear-gradient(90deg, #f9a8d4, #ec4899)"
+  support_confidence: "linear-gradient(90deg, #f9a8d4, #ec4899)",
+  trajectory_alignment: "linear-gradient(90deg, #6ee7b7, #059669)",
 };
 
 const COMPONENT_LABELS: Record<string, string> = {
   semantic_relevance: "Semantic Relevance",
   intent_alignment: "Intent Alignment",
   reference_usefulness: "Reference Usefulness",
-  support_confidence: "Support Confidence"
+  support_confidence: "Support Confidence",
+  trajectory_alignment: "Trajectory Alignment",
 };
 
 // Keys to display — excludes performance_quality (always 0)
 const DISPLAY_KEYS = [
   "semantic_relevance",
   "intent_alignment",
+  "trajectory_alignment",
   "reference_usefulness",
-  "support_confidence"
+  "support_confidence",
 ];
 
 export function ScoreComponentsChart(props: ScoreComponentsChartProps): JSX.Element {
   const { components, compact = false } = props;
 
+  const comps = components as Record<string, number | undefined>;
   return (
     <div className={`score-components-chart ${compact ? "score-components-compact" : ""}`}>
-      {DISPLAY_KEYS.map((key) => (
+      {DISPLAY_KEYS.filter((key) => comps[key] !== undefined).map((key) => (
         <ScoreBar
           key={key}
           label={COMPONENT_LABELS[key] ?? key}
-          value={(components as Record<string, number>)[key] ?? 0}
+          value={comps[key] ?? 0}
           maxValue={1}
           color={COMPONENT_COLORS[key]}
           showPercent

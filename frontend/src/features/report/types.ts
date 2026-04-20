@@ -75,6 +75,7 @@ export interface ComparableItem {
     performance_quality: number;
     reference_usefulness: number;
     support_confidence: number;
+    trajectory_alignment?: number;
   };
   retrieval_branches: string[];
 }
