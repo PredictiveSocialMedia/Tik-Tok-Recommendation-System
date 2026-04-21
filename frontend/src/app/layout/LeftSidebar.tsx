@@ -1,8 +1,20 @@
-﻿import { UserAvatarButton } from "./UserAvatarButton";
+import { useAuth } from "../AuthContext";
+import { UserAvatarButton } from "./UserAvatarButton";
 
 export function LeftSidebar(): JSX.Element {
+  const { signOut } = useAuth();
   const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
   const inLabeling = pathname.startsWith("/labeling");
+
+  const handleMenuClick = (): void => {
+    window.location.href = inLabeling ? "/" : "/labeling";
+  };
+
+  const handleSignOut = (): void => {
+    if (window.confirm("Sign out?")) {
+      void signOut();
+    }
+  };
 
   return (
     <aside className="left-sidebar" aria-label="Sidebar">
@@ -26,7 +38,9 @@ export function LeftSidebar(): JSX.Element {
       <button
         type="button"
         className="sidebar-icon-button"
-        aria-label="Main menu"
+        aria-label={inLabeling ? "Go to App" : "Go to Labels"}
+        title={inLabeling ? "Go to App" : "Go to Labels"}
+        onClick={handleMenuClick}
       >
         <svg
           width="20"
@@ -61,7 +75,11 @@ export function LeftSidebar(): JSX.Element {
         </svg>
       </button>
 
-      <UserAvatarButton className="sidebar-avatar-button" />
+      <UserAvatarButton
+        className="sidebar-avatar-button"
+        onClick={handleSignOut}
+        title="Sign out"
+      />
     </aside>
   );
 }

@@ -2218,9 +2218,11 @@ button.comp-card-body:focus-visible {
 }
 
 .comp-action-active {
-  background: rgba(167, 139, 250, 0.18);
-  border-color: rgba(167, 139, 250, 0.35);
-  color: rgba(200, 180, 255, 0.95);
+  background: rgba(167, 139, 250, 0.32);
+  border-color: rgba(167, 139, 250, 0.7);
+  color: #e2d4ff;
+  font-weight: 700;
+  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.4), 0 2px 8px rgba(139, 92, 246, 0.25);
 }
 
 /* ─── Score Bar Component ─── */

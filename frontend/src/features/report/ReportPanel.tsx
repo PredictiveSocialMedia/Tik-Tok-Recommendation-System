@@ -108,7 +108,10 @@ export function ReportPanel(props: ReportPanelProps): JSX.Element {
   >({});
 
   const handleMarkRelevant = (item: ComparableItem, label: "relevant" | "not_relevant"): void => {
-    setFeedbackState((prev) => ({ ...prev, [item.candidate_id]: label }));
+    setFeedbackState((prev) => {
+      const next = prev[item.candidate_id] === label ? undefined : label;
+      return { ...prev, [item.candidate_id]: next };
+    });
     void sendReportFeedback({
       ...buildFeedbackBase(report),
       event_name: label === "relevant" ? "comparable_marked_relevant" : "comparable_marked_not_relevant",
@@ -122,7 +125,10 @@ export function ReportPanel(props: ReportPanelProps): JSX.Element {
   };
 
   const handleSaveComparable = (item: ComparableItem): void => {
-    setFeedbackState((prev) => ({ ...prev, [item.candidate_id]: "saved" }));
+    setFeedbackState((prev) => {
+      const next = prev[item.candidate_id] === "saved" ? undefined : "saved";
+      return { ...prev, [item.candidate_id]: next };
+    });
     void sendReportFeedback({
       ...buildFeedbackBase(report),
       event_name: "comparable_saved",
