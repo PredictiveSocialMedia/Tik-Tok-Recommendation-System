@@ -9,7 +9,8 @@ interface ComparablesSectionProps {
   onOpenVideo: (item: ComparableItem) => void;
   onMarkRelevant: (item: ComparableItem, label: "relevant" | "not_relevant") => void;
   onSaveComparable: (item: ComparableItem) => void;
-  feedbackState: Record<string, "relevant" | "not_relevant" | "saved" | undefined>;
+  savedState: Record<string, boolean>;
+  relevanceState: Record<string, "relevant" | "not_relevant" | undefined>;
 }
 
 function formatCompactNumber(value: number): string {
@@ -172,9 +173,9 @@ export function ComparablesSection(props: ComparablesSectionProps): JSX.Element 
               <div className="comp-card-actions">
                 <button
                   type="button"
-                  className={`comp-action-btn${props.feedbackState[item.candidate_id] === "saved" ? " comp-action-active" : ""}`}
+                  className={`comp-action-btn${props.savedState[item.candidate_id] ? " comp-action-active" : ""}`}
                   aria-label="Save comparable"
-                  aria-pressed={props.feedbackState[item.candidate_id] === "saved"}
+                  aria-pressed={Boolean(props.savedState[item.candidate_id])}
                   onClick={(e) => { e.stopPropagation(); props.onSaveComparable(item); }}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
@@ -182,9 +183,9 @@ export function ComparablesSection(props: ComparablesSectionProps): JSX.Element 
                 </button>
                 <button
                   type="button"
-                  className={`comp-action-btn${props.feedbackState[item.candidate_id] === "relevant" ? " comp-action-active" : ""}`}
+                  className={`comp-action-btn${props.relevanceState[item.candidate_id] === "relevant" ? " comp-action-active" : ""}`}
                   aria-label="Mark relevant"
-                  aria-pressed={props.feedbackState[item.candidate_id] === "relevant"}
+                  aria-pressed={props.relevanceState[item.candidate_id] === "relevant"}
                   onClick={(e) => { e.stopPropagation(); props.onMarkRelevant(item, "relevant"); }}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
@@ -192,9 +193,9 @@ export function ComparablesSection(props: ComparablesSectionProps): JSX.Element 
                 </button>
                 <button
                   type="button"
-                  className={`comp-action-btn${props.feedbackState[item.candidate_id] === "not_relevant" ? " comp-action-active" : ""}`}
+                  className={`comp-action-btn${props.relevanceState[item.candidate_id] === "not_relevant" ? " comp-action-active" : ""}`}
                   aria-label="Mark not relevant"
-                  aria-pressed={props.feedbackState[item.candidate_id] === "not_relevant"}
+                  aria-pressed={props.relevanceState[item.candidate_id] === "not_relevant"}
                   onClick={(e) => { e.stopPropagation(); props.onMarkRelevant(item, "not_relevant"); }}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"/></svg>
