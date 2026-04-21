@@ -1,12 +1,20 @@
-﻿interface UserAvatarButtonProps {
+interface UserAvatarButtonProps {
   className?: string;
+  onClick?: () => void;
+  title?: string;
 }
 
 export function UserAvatarButton(props: UserAvatarButtonProps): JSX.Element {
   const className = props.className ?? "";
 
   return (
-    <button type="button" className={`avatar-button ${className}`} aria-label="User profile">
+    <button
+      type="button"
+      className={`avatar-button ${className}`}
+      aria-label="User profile"
+      onClick={props.onClick}
+      title={props.title}
+    >
       <svg
         width="20"
         height="20"
