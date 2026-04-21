@@ -303,6 +303,25 @@ def load_comment_intelligence_snapshot_manifest(
     return manifest, rows
 
 
+def _clean_missingness_payload(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+
+    cleaned: Dict[str, Any] = {}
+    for key, item in value.items():
+        if item is None:
+            continue
+        if isinstance(item, dict):
+            cleaned[str(key)] = item
+    return cleaned
+
+
+def _clean_comment_snapshot_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    cleaned = dict(row)
+    cleaned["missingness"] = _clean_missingness_payload(row.get("missingness"))
+    return cleaned
+
+
 def build_comment_transfer_priors(
     *,
     snapshot_manifest: Path | str | Dict[str, Any],
@@ -317,7 +336,10 @@ def build_comment_transfer_priors(
         payload, rows = load_comment_intelligence_snapshot_manifest(snapshot_manifest)
         manifest = CommentIntelligenceSnapshotManifest.model_validate(payload)
 
-    snapshots = [CommentIntelligenceSnapshot.model_validate(item) for item in rows]
+    snapshots = [
+        CommentIntelligenceSnapshot.model_validate(_clean_comment_snapshot_row(item))
+        for item in rows
+    ]
     as_of = datetime.fromisoformat(manifest.as_of_time.replace("Z", "+00:00")).astimezone(timezone.utc)
     priors = build_transfer_priors_from_snapshots(
         snapshots=snapshots,
