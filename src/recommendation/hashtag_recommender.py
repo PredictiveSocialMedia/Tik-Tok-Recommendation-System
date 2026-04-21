@@ -248,7 +248,37 @@ class HashtagRecommender:
             })
 
         recs.sort(key=lambda x: (-x["score"], -x["frequency"]))
-        return recs[:top_n]
+
+        # ── Diversity-aware reranking ────────────────────────────────────────
+        # Applies a lightweight diversity penalty inspired by MMR principles.
+        # Each candidate's score is penalized by its character-level similarity
+        # to already-selected tags, preventing near-duplicate results like
+        # #football, #footballskills, #footballgoals from all ranking at the top.
+        def _jaccard(a: str, b: str, n: int = 3) -> float:
+            """Character n-gram Jaccard similarity between two tag strings."""
+            sa = {a[i:i+n] for i in range(len(a)-n+1)}
+            sb = {b[i:i+n] for i in range(len(b)-n+1)}
+            if not sa or not sb:
+                return 0.0
+            return len(sa & sb) / len(sa | sb)
+
+        diversity_weight = 0.5
+        selected: List[Dict[str, Any]] = []
+
+        for candidate in recs:
+            if not selected:
+                selected.append(candidate)
+                continue
+            max_sim = max(_jaccard(candidate["hashtag"], s["hashtag"]) for s in selected)
+            candidate["score"] = round(
+                candidate["score"] - diversity_weight * max_sim, 4
+            )
+            selected.append(candidate)
+            if len(selected) >= top_n:
+                break
+
+        selected.sort(key=lambda x: (-x["score"], -x["frequency"]))
+        return selected[:top_n]
 
     def recommend_with_neighbours(
         self,
