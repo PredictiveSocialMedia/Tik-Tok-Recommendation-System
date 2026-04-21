@@ -8,7 +8,7 @@ export function LeftSidebar(): JSX.Element {
   const inLabeling = currentRoute === "labeling";
 
   const handleMenuClick = (): void => {
-    navigate(inLabeling ? "app" : "labeling");
+    navigate("labeling");
   };
 
   const handleSignOut = (): void => {
@@ -41,8 +41,8 @@ export function LeftSidebar(): JSX.Element {
       <button
         type="button"
         className="sidebar-icon-button"
-        aria-label={inLabeling ? "Go to App" : "Go to Labels"}
-        title={inLabeling ? "Go to App" : "Go to Labels"}
+        aria-label="Go to Labels"
+        title="Go to Labels"
         onClick={handleMenuClick}
       >
         <svg
