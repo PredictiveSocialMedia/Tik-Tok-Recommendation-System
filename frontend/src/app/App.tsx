@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useAuth } from "./AuthContext";
+import { useNavigation } from "./NavigationContext";
 import { AppShell } from "./AppShell";
 import { LoginPage } from "../features/auth/LoginPage";
 import { LabelingPage } from "../features/labeling/LabelingPage";
@@ -9,6 +10,7 @@ import { ApiVideoAnalysisService } from "../services/api/videoAnalysisApi";
 
 export function App(): JSX.Element {
   const { user, loading } = useAuth();
+  const { currentRoute } = useNavigation();
   const analysisService = useMemo(() => new ApiVideoAnalysisService(), []);
   const chatService = useMemo(() => new ApiChatService(), []);
 
@@ -24,14 +26,9 @@ export function App(): JSX.Element {
     return <LoginPage />;
   }
 
-  const isLabelingRoute =
-    typeof window !== "undefined" &&
-    (window.location.pathname.startsWith("/labeling") ||
-      window.location.hash === "#labeling");
-
   return (
     <AppShell>
-      {isLabelingRoute ? (
+      {currentRoute === "labeling" ? (
         <LabelingPage />
       ) : (
         <UploadPage analysisService={analysisService} chatService={chatService} />

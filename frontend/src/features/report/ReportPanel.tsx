@@ -103,12 +103,13 @@ export function ReportPanel(props: ReportPanelProps): JSX.Element {
     }
   };
 
-  const [feedbackState, setFeedbackState] = useState<
-    Record<string, "relevant" | "not_relevant" | "saved" | undefined>
+  const [savedState, setSavedState] = useState<Record<string, boolean>>({});
+  const [relevanceState, setRelevanceState] = useState<
+    Record<string, "relevant" | "not_relevant" | undefined>
   >({});
 
   const handleMarkRelevant = (item: ComparableItem, label: "relevant" | "not_relevant"): void => {
-    setFeedbackState((prev) => {
+    setRelevanceState((prev) => {
       const next = prev[item.candidate_id] === label ? undefined : label;
       return { ...prev, [item.candidate_id]: next };
     });
@@ -125,10 +126,7 @@ export function ReportPanel(props: ReportPanelProps): JSX.Element {
   };
 
   const handleSaveComparable = (item: ComparableItem): void => {
-    setFeedbackState((prev) => {
-      const next = prev[item.candidate_id] === "saved" ? undefined : "saved";
-      return { ...prev, [item.candidate_id]: next };
-    });
+    setSavedState((prev) => ({ ...prev, [item.candidate_id]: !prev[item.candidate_id] }));
     void sendReportFeedback({
       ...buildFeedbackBase(report),
       event_name: "comparable_saved",
@@ -177,7 +175,8 @@ export function ReportPanel(props: ReportPanelProps): JSX.Element {
             onOpenVideo={trackComparableOpen}
             onMarkRelevant={handleMarkRelevant}
             onSaveComparable={handleSaveComparable}
-            feedbackState={feedbackState}
+            savedState={savedState}
+            relevanceState={relevanceState}
           />
 
           <InsightsSection reasoning={report.reasoning} />

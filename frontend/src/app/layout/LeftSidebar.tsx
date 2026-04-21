@@ -1,13 +1,14 @@
 import { useAuth } from "../AuthContext";
+import { useNavigation } from "../NavigationContext";
 import { UserAvatarButton } from "./UserAvatarButton";
 
 export function LeftSidebar(): JSX.Element {
   const { signOut } = useAuth();
-  const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
-  const inLabeling = pathname.startsWith("/labeling");
+  const { currentRoute, navigate } = useNavigation();
+  const inLabeling = currentRoute === "labeling";
 
   const handleMenuClick = (): void => {
-    window.location.href = inLabeling ? "/" : "/labeling";
+    navigate(inLabeling ? "app" : "labeling");
   };
 
   const handleSignOut = (): void => {
@@ -19,20 +20,22 @@ export function LeftSidebar(): JSX.Element {
   return (
     <aside className="left-sidebar" aria-label="Sidebar">
       <nav className="sidebar-nav" aria-label="Main navigation">
-        <a
-          href="/"
+        <button
+          type="button"
           className={`sidebar-nav-link ${!inLabeling ? "sidebar-nav-link-active" : ""}`}
           aria-label="Open main app"
+          onClick={() => navigate("app")}
         >
           <span>App</span>
-        </a>
-        <a
-          href="/labeling"
+        </button>
+        <button
+          type="button"
           className={`sidebar-nav-link ${inLabeling ? "sidebar-nav-link-active" : ""}`}
           aria-label="Open labeling workspace"
+          onClick={() => navigate("labeling")}
         >
           <span>Labels</span>
-        </a>
+        </button>
       </nav>
 
       <button
