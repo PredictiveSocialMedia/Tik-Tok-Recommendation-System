@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 
 export type AppRoute = "app" | "labeling";
 
@@ -27,6 +27,14 @@ export function NavigationProvider({ children }: { children: ReactNode }): JSX.E
     setCurrentRoute(route);
     const path = route === "labeling" ? "/labeling" : "/";
     window.history.pushState({}, "", path);
+  }, []);
+
+  useEffect(() => {
+    const onPopState = (): void => {
+      setCurrentRoute(resolveInitialRoute());
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
   return (

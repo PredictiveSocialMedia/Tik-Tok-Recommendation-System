@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigation } from "../../app/NavigationContext";
 import { ComparableThumbnailImage } from "../report/components/ComparableThumbnailImage";
 import {
   createLabelingSession,
@@ -143,6 +144,7 @@ function preferredSessionId(
 }
 
 export function LabelingPage(): JSX.Element {
+  const { navigate } = useNavigation();
   const [sources, setSources] = useState<LabelingSourceSummary[]>([]);
   const [sessions, setSessions] = useState<LabelingSessionListItem[]>([]);
   const [selectedSourceId, setSelectedSourceId] = useState<string>("");
@@ -351,9 +353,7 @@ export function LabelingPage(): JSX.Element {
           <button
             type="button"
             className="report-ghost-action"
-            onClick={() => {
-              window.location.href = "/";
-            }}
+            onClick={() => navigate("app")}
           >
             Back to app
           </button>

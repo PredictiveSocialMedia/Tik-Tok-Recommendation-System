@@ -13,28 +13,37 @@ async function parseJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function safeFetch(url: string, options?: RequestInit): Promise<Response | null> {
+  try {
+    const response = await fetch(url, options);
+    return response;
+  } catch {
+    return null;
+  }
+}
+
 export async function listLabelingSources(): Promise<LabelingSourceSummary[]> {
   if (MOCK_ONLY_MODE) {
     return [];
   }
-  const response = await fetch(LABELING_SOURCES_API_URL);
-  if (!response.ok) {
-    throw new Error("labeling_sources_request_failed");
+  const response = await safeFetch(LABELING_SOURCES_API_URL);
+  if (!response || !response.ok) {
+    return [];
   }
   const payload = await parseJson<{ sources: LabelingSourceSummary[] }>(response);
-  return payload.sources;
+  return payload.sources ?? [];
 }
 
 export async function listLabelingSessions(): Promise<LabelingSessionListItem[]> {
   if (MOCK_ONLY_MODE) {
     return [];
   }
-  const response = await fetch(LABELING_SESSIONS_API_URL);
-  if (!response.ok) {
-    throw new Error("labeling_sessions_request_failed");
+  const response = await safeFetch(LABELING_SESSIONS_API_URL);
+  if (!response || !response.ok) {
+    return [];
   }
   const payload = await parseJson<{ sessions: LabelingSessionListItem[] }>(response);
-  return payload.sessions;
+  return payload.sessions ?? [];
 }
 
 export async function createLabelingSession(input?: {
