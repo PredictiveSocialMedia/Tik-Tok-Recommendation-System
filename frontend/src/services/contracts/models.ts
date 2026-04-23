@@ -118,7 +118,20 @@ export type ChatRole = "assistant" | "user";
 export interface ChatMessage {
   id: string;
   role: ChatRole;
+  /** Flattened plain-text content. Used as a11y fallback and legacy path. */
   content: string;
+  /** One-sentence summary (assistant only). Optional; safe to omit. */
+  summary?: string;
+  /**
+   * Split response bubbles. When present and length > 1, the UI renders each
+   * chunk as a separate staggered bubble. Falls back to `content` otherwise.
+   */
+  chunks?: string[];
+  /**
+   * Suggested follow-up questions the user might click (assistant only).
+   * Rendered as chips below the last assistant bubble.
+   */
+  followUps?: string[];
   timestamp: string;
 }
 
