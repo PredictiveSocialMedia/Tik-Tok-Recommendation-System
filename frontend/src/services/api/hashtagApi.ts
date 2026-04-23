@@ -42,7 +42,8 @@ export async function suggestHashtags(
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+    // 60s timeout — allows for Cloud Run cold-start (~30-45s) on the ML backend
+    const timeout = setTimeout(() => controller.abort(), 60000);
 
     const response = await fetch(HASHTAG_SUGGEST_URL, {
       method: "POST",
