@@ -7,15 +7,33 @@ const CHAT_API_URL = buildApiUrl("/chat");
 
 interface ChatApiResponse {
   answer: string;
+  summary?: string;
+  chunks?: string[];
+  follow_ups?: string[];
   sources?: string[];
   evidence_refs?: string[];
 }
 
-function createAssistantMessage(content: string): ChatMessage {
+function createAssistantMessage(parsed: ChatApiResponse): ChatMessage {
+  const normalisedChunks = Array.isArray(parsed.chunks)
+    ? parsed.chunks.filter((chunk): chunk is string => typeof chunk === "string" && chunk.trim().length > 0)
+    : [];
+  const normalisedFollowUps = Array.isArray(parsed.follow_ups)
+    ? parsed.follow_ups.filter((q): q is string => typeof q === "string" && q.trim().length > 0)
+    : [];
+
   return {
     id: `assistant-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     role: "assistant",
-    content,
+    content: parsed.answer,
+    summary: typeof parsed.summary === "string" && parsed.summary.trim().length > 0
+      ? parsed.summary
+      : undefined,
+    // If the backend produced structured chunks we keep them; otherwise fall
+    // back to a single-chunk wrapping of the flat answer so downstream code
+    // can always treat chunks as the source of truth.
+    chunks: normalisedChunks.length > 0 ? normalisedChunks : [parsed.answer],
+    followUps: normalisedFollowUps.length > 0 ? normalisedFollowUps : undefined,
     timestamp: new Date().toISOString()
   };
 }
@@ -53,6 +71,6 @@ export class ApiChatService implements IChatService {
     }
 
     const parsed = (await response.json()) as ChatApiResponse;
-    return createAssistantMessage(parsed.answer);
+    return createAssistantMessage(parsed);
   }
 }
