@@ -1346,17 +1346,113 @@ select.glass-textarea option {
 
 .chat-message p {
   margin: 0;
-  line-height: 1.35;
+  line-height: 1.4;
 }
 
 .chat-message-assistant {
   align-self: flex-start;
   background: rgba(227, 208, 252, 0.2);
+  /* narrower for readability of structured chunks */
+  max-width: 86%;
 }
 
 .chat-message-user {
   align-self: flex-end;
   background: rgba(255, 255, 255, 0.16);
+}
+
+/* Multi-chunk assistant rendering ---------------------------------------- */
+.chat-message-chunks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-message-chunk {
+  animation: chatChunkIn 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* Chunks inherit the bubble background but carry an inner divider for air. */
+.chat-message-chunks > .chat-message-chunk + .chat-message-chunk {
+  border-top: 1px solid rgba(227, 208, 252, 0.22);
+  padding-top: 8px;
+}
+
+@keyframes chatChunkIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Markdown elements rendered inside assistant bubbles -------------------- */
+.chat-message-chunk > :first-child { margin-top: 0; }
+.chat-message-chunk > :last-child { margin-bottom: 0; }
+.chat-message-chunk p { margin: 0 0 6px; }
+.chat-message-chunk p:last-child { margin-bottom: 0; }
+
+.chat-message-chunk ul,
+.chat-message-chunk ol {
+  margin: 4px 0 6px;
+  padding-left: 20px;
+  line-height: 1.4;
+}
+.chat-message-chunk li + li { margin-top: 2px; }
+
+.chat-message-chunk strong {
+  color: rgba(227, 208, 252, 0.95);
+  font-weight: 600;
+}
+.chat-message-chunk em { font-style: italic; opacity: 0.92; }
+.chat-message-chunk code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  background: rgba(255, 255, 255, 0.10);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.chat-message-chunk a {
+  color: rgba(227, 208, 252, 0.95);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Follow-up chips -------------------------------------------------------- */
+.chat-followups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 0 2px;
+}
+
+.chat-followup-chip {
+  border: 1px solid rgba(227, 208, 252, 0.35);
+  background: rgba(227, 208, 252, 0.10);
+  color: var(--text-main);
+  font-family: inherit;
+  font-size: 0.78rem;
+  line-height: 1.25;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, transform 120ms ease;
+  max-width: 100%;
+  text-align: left;
+}
+
+.chat-followup-chip:hover:not(:disabled) {
+  background: rgba(227, 208, 252, 0.22);
+  border-color: rgba(227, 208, 252, 0.6);
+  transform: translateY(-1px);
+}
+
+.chat-followup-chip:focus-visible {
+  outline: 2px solid rgba(227, 208, 252, 0.7);
+  outline-offset: 2px;
+}
+
+.chat-followup-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .chat-thinking {
