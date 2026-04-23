@@ -1,8 +1,31 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { safeParseChatJson } from "./_chat_parse";
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY ?? "";
 const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL ?? "deepseek-chat";
 const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com";
+
+const CHAT_SYSTEM_PROMPT = [
+  "You are a TikTok content strategist helping a creator improve a specific video.",
+  "You have access to a recommendation report (top 5 comparable videos with scores and hashtags) and a video analysis (caption, transcript, keywords).",
+  "",
+  'Respond ONLY with a JSON object matching this exact shape: { "summary": string, "chunks": string[], "follow_ups": string[] }',
+  "",
+  "Rules:",
+  "- summary: one plain-text sentence, <=140 chars, no emojis, no markdown. Captures the single most important diagnosis.",
+  "- chunks: 3 to 5 items. Each 80-260 chars. One idea per chunk.",
+  '- Each chunk starts with a short lead phrase followed by a colon (e.g., "Hook timing:", "Caption rewrite:", "Pacing fix:").',
+  "- Plain text only. Never use **, ##, or any markdown symbol — the client renders plain paragraphs.",
+  "- Max 2 emojis total across the ENTIRE response. Only when they add genuine clarity (for example 🎯 hook, 📈 metric, ⚡ pacing). Never decorative.",
+  "- Ground every claim in the report/video data (cite candidate numbers, scores, specific keywords, timestamps).",
+  "- Avoid filler phrases like 'Based on the data' or 'As a strategist'. Get straight to the point.",
+  "",
+  "- follow_ups: exactly 3 natural questions the user might ask next, phrased in first person as if the user is speaking.",
+  '  Examples: "How do I rewrite my hook?", "Which hashtag should I drop?", "What would a stronger CTA look like?"',
+  "  Each <=90 chars, specific to THIS conversation (not generic).",
+  "",
+  "Output only the JSON object. No preamble, no closing remarks, no code fences.",
+].join("\n");
 
 interface ChatBody {
   question?: string;
@@ -72,6 +95,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!DEEPSEEK_API_KEY) {
     return res.json({
       answer: "Upload a video and generate a report to start chatting.",
+      summary: "",
+      chunks: ["Upload a video and generate a report to start chatting."],
+      follow_ups: [],
       sources: [],
     });
   }
@@ -90,6 +116,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 25_000);
 
+    const isReasoner = DEEPSEEK_MODEL.includes("reasoner");
     const response = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: {
@@ -100,28 +127,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       body: JSON.stringify({
         model: DEEPSEEK_MODEL,
         // deepseek-reasoner does not accept temperature
-        ...(DEEPSEEK_MODEL.includes("reasoner") ? {} : { temperature: 0.4 }),
+        ...(isReasoner ? {} : { temperature: 0.4 }),
         max_tokens: 2048,
+        // deepseek-chat supports JSON mode; reasoner does not — we parse defensively either way.
+        ...(isReasoner ? {} : { response_format: { type: "json_object" as const } }),
         messages: [
-          // deepseek-reasoner ignores system messages — prepend to user content instead
-          ...(DEEPSEEK_MODEL.includes("reasoner")
+          // deepseek-reasoner ignores system messages — prepend instructions to user content instead.
+          ...(isReasoner
             ? []
-            : [
-                {
-                  role: "system" as const,
-                  content:
-                    "You are a TikTok video content strategist with access to frame-by-frame video analysis, " +
-                    "a recommendation report with comparable videos, and a searchable corpus of 13,000+ TikTok videos. " +
-                    "Reference specific data when answering. " +
-                    "Be concrete and actionable. No emojis. No generic filler. " +
-                    "When discussing the user's video, cite analysis data (timestamps, relevance scores, scene changes). " +
-                    "When suggesting content strategy, reference comparable videos and their engagement patterns.",
-                },
-              ]),
+            : [{ role: "system" as const, content: CHAT_SYSTEM_PROMPT }]),
           {
             role: "user",
-            content: DEEPSEEK_MODEL.includes("reasoner")
-              ? "You are a TikTok content strategist. Be concrete and actionable. No emojis.\n\n" + userContent
+            content: isReasoner
+              ? CHAT_SYSTEM_PROMPT + "\n\n---\n\n" + userContent
               : userContent,
           },
         ],
@@ -134,8 +152,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const text = await response.text();
       console.error("DeepSeek error:", response.status, text);
       console.error("DeepSeek request model:", DEEPSEEK_MODEL, "| user content length:", userContent.length);
+      const message = "The AI assistant is currently unavailable. Please try again.";
       return res.json({
-        answer: "The AI assistant is currently unavailable. Please try again.",
+        answer: message,
+        summary: "",
+        chunks: [message],
+        follow_ups: [],
         sources: [],
       });
     }
@@ -143,13 +165,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const data = (await response.json()) as {
       choices: { message: { content: string } }[];
     };
-    const answer = data.choices?.[0]?.message?.content?.trim() ?? "No response.";
+    const raw = data.choices?.[0]?.message?.content?.trim() ?? "";
+    const parsed = safeParseChatJson(raw);
 
-    return res.json({ answer, sources: ["deepseek"] });
+    // `answer` is kept as a flattened plain-text fallback so any legacy client
+    // reading only { answer } still renders something useful.
+    const answer = parsed.chunks.length > 0 ? parsed.chunks.join("\n\n") : raw || "No response.";
+
+    return res.json({
+      answer,
+      summary: parsed.summary,
+      chunks: parsed.chunks,
+      follow_ups: parsed.follow_ups,
+      sources: ["deepseek"],
+    });
   } catch (err) {
     console.error("Chat error:", err);
+    const message = "The AI assistant is currently unavailable. Please try again.";
     return res.json({
-      answer: "The AI assistant is currently unavailable. Please try again.",
+      answer: message,
+      summary: "",
+      chunks: [message],
+      follow_ups: [],
       sources: [],
     });
   }
