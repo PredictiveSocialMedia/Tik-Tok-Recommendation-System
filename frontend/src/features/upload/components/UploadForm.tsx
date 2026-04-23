@@ -1,5 +1,6 @@
 ﻿import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ClipboardEvent,
@@ -20,6 +21,12 @@ interface UploadFormProps {
   disabled: boolean;
   isAnalyzing?: boolean;
   error: string | null;
+  /**
+   * Hashtags suggested by the upstream video analysis (DeepSeek) — offered
+   * to the user as clickable chips alongside the live recommender suggestions.
+   * Never auto-added to values.hashtags.
+   */
+  aiSuggestedHashtags?: string[];
   onDescriptionChange: (value: string) => void;
   onMentionsChange: (values: string[]) => void;
   onHashtagsChange: (values: string[]) => void;
@@ -186,6 +193,7 @@ export function UploadForm(props: UploadFormProps): JSX.Element {
     disabled,
     isAnalyzing = false,
     error,
+    aiSuggestedHashtags = [],
     onDescriptionChange,
     onMentionsChange,
     onHashtagsChange,
@@ -201,6 +209,40 @@ export function UploadForm(props: UploadFormProps): JSX.Element {
   const [editorInitialValue, setEditorInitialValue] = useState<string>("");
   const [hashtagSuggestions, setHashtagSuggestions] = useState<HashtagSuggestion[]>([]);
   const [suggestingHashtags, setSuggestingHashtags] = useState(false);
+
+  /**
+   * Merged suggestion pool shown as chips, in priority order:
+   *   1. AI suggestions from the video analysis (DeepSeek) — topical to the
+   *      uploaded video, always shown when available.
+   *   2. Live recommender suggestions from `hashtagApi` — based on the current
+   *      caption text, refreshed on debounce.
+   *
+   * Already-added hashtags are filtered out so the chip list only ever offers
+   * tags the user has NOT yet accepted.
+   */
+  const mergedHashtagChips: HashtagSuggestion[] = useMemo(() => {
+    const alreadyAdded = new Set(values.hashtags.map(normalizeForCompare));
+    const seen = new Set<string>();
+    const merged: HashtagSuggestion[] = [];
+
+    const pushIfNew = (tag: string, source: "ai" | "live", meta?: HashtagSuggestion): void => {
+      const clean = normalizeForCompare(tag.replace(/^#/, ""));
+      if (!clean || alreadyAdded.has(clean) || seen.has(clean)) return;
+      seen.add(clean);
+      if (source === "live" && meta) {
+        merged.push(meta);
+      } else {
+        // AI chips don't carry real scores — keep the shape consistent so the
+        // render code stays branch-free.
+        merged.push({ hashtag: clean, score: 0, frequency: 0, avg_engagement: 0 });
+      }
+    };
+
+    for (const tag of aiSuggestedHashtags) pushIfNew(tag, "ai");
+    for (const suggestion of hashtagSuggestions) pushIfNew(suggestion.hashtag, "live", suggestion);
+
+    return merged;
+  }, [aiSuggestedHashtags, hashtagSuggestions, values.hashtags]);
 
   const openEditor = (mode: TagEditorMode, initialValue = ""): void => {
     setEditorMode(mode);
@@ -341,7 +383,7 @@ export function UploadForm(props: UploadFormProps): JSX.Element {
           items={values.hashtags}
           disabled={disabled}
           placeholder={isAnalyzing && values.hashtags.length === 0 ? "Suggesting hashtags..." : undefined}
-          suggestions={hashtagSuggestions}
+          suggestions={mergedHashtagChips}
           loadingSuggestions={suggestingHashtags}
           onPickSuggestion={handlePickSuggestion}
           onOpen={(initialValue) => openEditor("hashtags", initialValue)}
