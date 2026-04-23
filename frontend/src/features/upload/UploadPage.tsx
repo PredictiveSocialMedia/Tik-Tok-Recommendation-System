@@ -83,6 +83,7 @@ export function UploadPage(props: UploadPageProps): JSX.Element {
         disabled={uploadWorkflow.isBusy}
         isAnalyzing={uploadWorkflow.isAnalyzing}
         error={uploadWorkflow.error}
+        aiSuggestedHashtags={uploadWorkflow.aiSuggestedHashtags}
         onDescriptionChange={uploadWorkflow.setDescription}
         onMentionsChange={uploadWorkflow.setMentions}
         onHashtagsChange={uploadWorkflow.setHashtags}

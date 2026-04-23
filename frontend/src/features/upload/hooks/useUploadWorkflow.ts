@@ -38,6 +38,11 @@ interface UseUploadWorkflowResult {
   reportResult: ReportOutput | null;
   reportHashtags: ReportHashtagSuggestion[];
   userHashtags: string[];
+  /**
+   * Hashtags suggested by the AI description generator. Shown to the user
+   * as clickable chips — never auto-added to userHashtags.
+   */
+  aiSuggestedHashtags: string[];
   uploadSession: number;
   isBusy: boolean;
   isAnalyzing: boolean;
@@ -144,6 +149,12 @@ export function useUploadWorkflow(
   const [uploadSession, setUploadSession] = useState<number>(0);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [preAnalysis, setPreAnalysis] = useState<VideoAnalysisResult | null>(null);
+  /**
+   * Hashtags suggested by the DeepSeek description generator when the
+   * video is analyzed. These are offered to the user as *suggestions*
+   * (chips to tap) — they are never silently added to formValues.hashtags.
+   */
+  const [aiSuggestedHashtags, setAiSuggestedHashtags] = useState<string[]>([]);
 
   const processingFlow = useProcessingFlow({ steps: PROCESSING_STEPS });
 
@@ -242,6 +253,7 @@ export function useUploadWorkflow(
     setError(null);
     setAnalysisResult(null);
     setReportResult(null);
+    setAiSuggestedHashtags([]);
     if (processingFlow.status !== "processing") {
       setPhase("idle");
     }
@@ -300,16 +312,24 @@ export function useUploadWorkflow(
                 }
               }
 
-              // Auto-fill suggested hashtags from DeepSeek
+              // Expose suggested hashtags from DeepSeek as *chip suggestions*
+              // (never auto-added to formValues.hashtags — the user decides).
               if (suggestion.hashtags && suggestion.hashtags.length > 0) {
-                setFormValues((prev) => {
-                  if (prev.hashtags.length > 0) return prev;
-                  return {
-                    ...prev,
-                    hashtags: suggestion.hashtags.slice(0, 8).map((h) =>
-                      h.replace(/^#/, "").trim().toLowerCase()
-                    ).filter(Boolean)
-                  };
+                const cleaned = suggestion.hashtags
+                  .slice(0, 8)
+                  .map((h) => h.replace(/^#/, "").trim().toLowerCase())
+                  .filter(Boolean);
+                setAiSuggestedHashtags((prev) => {
+                  // Merge with any previous AI suggestions, dedupe, cap at 10.
+                  const seen = new Set<string>();
+                  const merged: string[] = [];
+                  for (const tag of [...cleaned, ...prev]) {
+                    if (!seen.has(tag)) {
+                      seen.add(tag);
+                      merged.push(tag);
+                    }
+                  }
+                  return merged.slice(0, 10);
                 });
               }
             })
@@ -473,6 +493,7 @@ export function useUploadWorkflow(
     reportResult,
     reportHashtags,
     userHashtags: formValues.hashtags,
+    aiSuggestedHashtags,
     uploadSession,
     isBusy,
     isAnalyzing,
