@@ -34,7 +34,13 @@ export function ChatPanel(props: ChatPanelProps): JSX.Element {
     <section className="glass-card chat-panel">
       <h3 className="panel-title">video chat</h3>
 
-      <ChatMessageList messages={messages} />
+      <ChatMessageList
+        messages={messages}
+        onFollowUp={(question) => {
+          void sendMessage(question);
+        }}
+        followUpsDisabled={isThinking}
+      />
 
       {isThinking ? (
         <div className="chat-thinking" aria-live="polite">
