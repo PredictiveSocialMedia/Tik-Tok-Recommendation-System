@@ -24,6 +24,24 @@ interface ReportPanelProps {
   onShowPreview: () => void;
 }
 
+const FB_KEY_PREFIX = "ttrec_fb_";
+
+function loadPersistedFeedback(requestId: string): {
+  saved: Record<string, boolean>;
+  relevance: Record<string, "relevant" | "not_relevant" | undefined>;
+} {
+  try {
+    const raw = localStorage.getItem(`${FB_KEY_PREFIX}${requestId}`);
+    if (!raw) return { saved: {}, relevance: {} };
+    return JSON.parse(raw) as {
+      saved: Record<string, boolean>;
+      relevance: Record<string, "relevant" | "not_relevant" | undefined>;
+    };
+  } catch {
+    return { saved: {}, relevance: {} };
+  }
+}
+
 function buildFeedbackBase(report: ReportOutput) {
   return {
     request_id: report.meta.request_id,
@@ -103,10 +121,23 @@ export function ReportPanel(props: ReportPanelProps): JSX.Element {
     }
   };
 
-  const [savedState, setSavedState] = useState<Record<string, boolean>>({});
+  const [savedState, setSavedState] = useState<Record<string, boolean>>(
+    () => loadPersistedFeedback(report.meta.request_id).saved
+  );
   const [relevanceState, setRelevanceState] = useState<
     Record<string, "relevant" | "not_relevant" | undefined>
-  >({});
+  >(() => loadPersistedFeedback(report.meta.request_id).relevance);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        `${FB_KEY_PREFIX}${report.meta.request_id}`,
+        JSON.stringify({ saved: savedState, relevance: relevanceState })
+      );
+    } catch {
+      // ignore quota errors
+    }
+  }, [savedState, relevanceState, report.meta.request_id]);
 
   const handleMarkRelevant = (item: ComparableItem, label: "relevant" | "not_relevant"): void => {
     setRelevanceState((prev) => {
