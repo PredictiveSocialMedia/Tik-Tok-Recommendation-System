@@ -1,0 +1,49 @@
+{
+  "generated_at_utc": "2026-04-29T21:41:23+00:00",
+  "source_datamart": "data\\real\\training_datamart.json",
+  "source_datamart_sha256": "74e8b45fa1f7b8b87e9e6ec41d08d7727bef0b4b6ee426d5c2d358c5d0442413",
+  "ratios": {
+    "train": 0.7,
+    "validation": 0.15,
+    "test": 0.15
+  },
+  "totals": {
+    "rows_in_datamart": 731,
+    "rows_written": {
+      "train": 511,
+      "validation": 109,
+      "test": 111
+    }
+  },
+  "splits": [
+    {
+      "split": "train",
+      "n_rows": 511,
+      "n_unique_videos": 511,
+      "posted_at_min": "2026-04-02T22:03:21Z",
+      "posted_at_max": "2026-04-03T21:15:15Z",
+      "as_of_time_min": "2026-04-03T22:03:21Z",
+      "as_of_time_max": "2026-04-04T21:15:15Z"
+    },
+    {
+      "split": "validation",
+      "n_rows": 109,
+      "n_unique_videos": 109,
+      "posted_at_min": "2026-04-03T21:15:41Z",
+      "posted_at_max": "2026-04-04T01:01:42Z",
+      "as_of_time_min": "2026-04-04T21:15:41Z",
+      "as_of_time_max": "2026-04-05T01:01:42Z"
+    },
+    {
+      "split": "test",
+      "n_rows": 111,
+      "n_unique_videos": 111,
+      "posted_at_min": "2026-04-04T01:08:50Z",
+      "posted_at_max": "2026-04-04T07:43:58Z",
+      "as_of_time_min": "2026-04-05T01:08:50Z",
+      "as_of_time_max": "2026-04-05T07:43:58Z"
+    }
+  ],
+  "leakage_check": "passed: no video_id appears in more than one split",
+  "temporal_order_check": "passed: as_of_time is monotonically non-decreasing across train -> val -> test"
+}

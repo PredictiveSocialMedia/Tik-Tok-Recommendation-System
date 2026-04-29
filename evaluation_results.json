@@ -1,0 +1,40 @@
+{
+  "retrieval_only": {
+    "ndcg@5": 0.3029,
+    "mrr@5": 0.5464,
+    "recall@5": 0.305,
+    "ndcg@10": 0.3683,
+    "mrr@10": 0.5646,
+    "recall@10": 0.4628,
+    "ndcg@20": 0.4309,
+    "mrr@20": 0.567,
+    "recall@20": 0.647
+  },
+  "full_pipeline": {
+    "ndcg@5": 0.4292,
+    "mrr@5": 0.526,
+    "recall@5": 0.165,
+    "ndcg@10": 0.4784,
+    "mrr@10": 0.5465,
+    "recall@10": 0.3311,
+    "ndcg@20": 0.555,
+    "mrr@20": 0.5567,
+    "recall@20": 0.6294
+  },
+  "test_set_size": 111,
+  "queries_evaluated": 89,
+  "candidate_pool_size": 620,
+  "config": {
+    "k_values": [
+      5,
+      10,
+      20
+    ],
+    "retriever": "tfidf_cosine",
+    "ranker_blend": {
+      "cosine_weight": 0.6,
+      "engagement_weight": 0.4
+    },
+    "relevance_proxy": "candidate shares >=1 hashtag or top-3 keyword with query AND engagement >= median of hashtag bucket"
+  }
+}
