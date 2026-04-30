@@ -6,6 +6,10 @@ __pycache__/
 # C extensions
 *.so
 
+# Downloaded benchmark videos (regenerable via scripts/download_test_videos.py
+# using benchmarks/video_pipeline_test_set.json as the pinned list)
+data/test_videos/*.mp4
+
 # Distribution / packaging
 .Python
 build/

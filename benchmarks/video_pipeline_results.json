@@ -1,0 +1,233 @@
+{
+  "metadata": {
+    "run_at_utc": "2026-04-30T00:53:27+00:00",
+    "variant": "current",
+    "runs_per_video": 1,
+    "demucs_enabled": false,
+    "hardware": {
+      "platform": "Windows-11-10.0.26200-SP0",
+      "machine": "AMD64",
+      "processor": "Intel64 Family 6 Model 186 Stepping 3, GenuineIntel",
+      "python_version": "3.14.3",
+      "ram_gb": 7.7,
+      "cpu_count_logical": 12,
+      "cpu_count_physical": 10
+    }
+  },
+  "test_set": [
+    "7436371738939690272",
+    "7561479215632125206",
+    "7606018428654079254",
+    "7616543159295823118",
+    "7621422046051896590",
+    "7626297817027415327"
+  ],
+  "videos_benchmarked": 6,
+  "optimisations_applied": [
+    "timeline frames 20 -> 10",
+    "OCR sampling 5 frames -> 3",
+    "drop per-frame face detection",
+    "Whisper small -> base (int8)"
+  ],
+  "per_video": [
+    {
+      "video_id": "7436371738939690272",
+      "video_path": "data\\test_videos\\7436371738939690272.mp4",
+      "video_duration_s": 22.2,
+      "total_seconds": 216.6,
+      "wall_clock_seconds": 216.66,
+      "branch_count": 8,
+      "branch_latencies_s": {
+        "colors": 0.0,
+        "blur": 0.0,
+        "visual": 0.0,
+        "timeline": 0.0,
+        "transcribe": 0.0,
+        "ocr": 0.0,
+        "audio": 0.0,
+        "vlm": 0.0
+      },
+      "run_count": 1,
+      "all_run_totals_s": [
+        216.6
+      ]
+    },
+    {
+      "video_id": "7561479215632125206",
+      "video_path": "data\\test_videos\\7561479215632125206.mp4",
+      "video_duration_s": 61.1,
+      "total_seconds": 63.3,
+      "wall_clock_seconds": 63.36,
+      "branch_count": 8,
+      "branch_latencies_s": {
+        "audio": 0.0,
+        "colors": 0.0,
+        "blur": 0.0,
+        "timeline": 0.0,
+        "visual": 0.0,
+        "transcribe": 0.0,
+        "ocr": 0.0,
+        "vlm": 0.0
+      },
+      "run_count": 1,
+      "all_run_totals_s": [
+        63.3
+      ]
+    },
+    {
+      "video_id": "7606018428654079254",
+      "video_path": "data\\test_videos\\7606018428654079254.mp4",
+      "video_duration_s": 8.0,
+      "total_seconds": 136.1,
+      "wall_clock_seconds": 136.25,
+      "branch_count": 8,
+      "branch_latencies_s": {
+        "audio": 0.0,
+        "blur": 0.0,
+        "visual": 0.0,
+        "timeline": 0.0,
+        "colors": 0.0,
+        "transcribe": 0.0,
+        "vlm": 0.3,
+        "ocr": 0.0
+      },
+      "run_count": 1,
+      "all_run_totals_s": [
+        136.1
+      ]
+    },
+    {
+      "video_id": "7616543159295823118",
+      "video_path": "data\\test_videos\\7616543159295823118.mp4",
+      "video_duration_s": 51.6,
+      "total_seconds": 399.8,
+      "wall_clock_seconds": 400.37,
+      "branch_count": 8,
+      "branch_latencies_s": {
+        "audio": 0.0,
+        "blur": 0.0,
+        "colors": 0.0,
+        "timeline": 0.0,
+        "visual": 0.0,
+        "transcribe": 0.0,
+        "ocr": 0.0,
+        "vlm": 0.0
+      },
+      "run_count": 1,
+      "all_run_totals_s": [
+        399.8
+      ]
+    },
+    {
+      "video_id": "7621422046051896590",
+      "video_path": "data\\test_videos\\7621422046051896590.mp4",
+      "video_duration_s": 70.6,
+      "total_seconds": 319.8,
+      "wall_clock_seconds": 319.94,
+      "branch_count": 8,
+      "branch_latencies_s": {
+        "audio": 0.0,
+        "blur": 0.0,
+        "colors": 0.0,
+        "timeline": 0.0,
+        "visual": 0.0,
+        "vlm": 0.0,
+        "ocr": 0.0,
+        "transcribe": 0.0
+      },
+      "run_count": 1,
+      "all_run_totals_s": [
+        319.8
+      ]
+    },
+    {
+      "video_id": "7626297817027415327",
+      "video_path": "data\\test_videos\\7626297817027415327.mp4",
+      "video_duration_s": 18.9,
+      "total_seconds": 56.4,
+      "wall_clock_seconds": 56.47,
+      "branch_count": 8,
+      "branch_latencies_s": {
+        "audio": 0.0,
+        "blur": 0.0,
+        "timeline": 0.0,
+        "colors": 0.0,
+        "visual": 0.0,
+        "ocr": 0.0,
+        "transcribe": 0.0,
+        "vlm": 0.0
+      },
+      "run_count": 1,
+      "all_run_totals_s": [
+        56.4
+      ]
+    }
+  ],
+  "per_branch": {
+    "audio": {
+      "n": 2,
+      "mean_s": 0.0,
+      "median_s": 0.0,
+      "p50_s": 0.0,
+      "p95_s": 0.0
+    },
+    "blur": {
+      "n": 2,
+      "mean_s": 0.586,
+      "median_s": 0.586,
+      "p50_s": 0.586,
+      "p95_s": 0.621
+    },
+    "colors": {
+      "n": 2,
+      "mean_s": 7.298,
+      "median_s": 7.298,
+      "p50_s": 7.298,
+      "p95_s": 9.78
+    },
+    "ocr": {
+      "n": 2,
+      "mean_s": 64.789,
+      "median_s": 64.789,
+      "p50_s": 64.789,
+      "p95_s": 84.508
+    },
+    "timeline": {
+      "n": 2,
+      "mean_s": 2.659,
+      "median_s": 2.659,
+      "p50_s": 2.659,
+      "p95_s": 3.517
+    },
+    "transcribe": {
+      "n": 2,
+      "mean_s": 57.221,
+      "median_s": 57.221,
+      "p50_s": 57.221,
+      "p95_s": 80.574
+    },
+    "visual": {
+      "n": 2,
+      "mean_s": 0.0,
+      "median_s": 0.0,
+      "p50_s": 0.0,
+      "p95_s": 0.0
+    },
+    "vlm": {
+      "n": 2,
+      "mean_s": 78.57,
+      "median_s": 78.57,
+      "p50_s": 78.57,
+      "p95_s": 90.366
+    }
+  },
+  "per_branch_test_set": [
+    "7606018428654079254",
+    "7626297817027415327"
+  ],
+  "notes": [
+    "per_video totals come from a 6-video run (broader sample of wall-clock latency).",
+    "per_branch numbers come from a 2-video run with a ThreadPoolExecutor.submit monkey-patch that times each branch end-to-end. The analyzer's own log line measures completion-handler time (always ~0s), so the patch is required to get real per-branch latency without modifying app code.",
+    "Demucs is disabled locally (heavy model); the 'audio' branch reports 0s as a result."
+  ]
+}
