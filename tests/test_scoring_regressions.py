@@ -177,6 +177,94 @@ def test_aggregate_mean_of_known_values() -> None:
 # ---------------------------------------------------------------------------
 # End-to-end output shape from the evaluation pipeline
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Configurable reranker blend weights (CLI / env / default precedence)
+# ---------------------------------------------------------------------------
+def test_blend_default_weights_unchanged() -> None:
+    """Backwards-compat: when no overrides are passed, the default blend
+    must remain (0.6, 0.4)."""
+    from scripts.evaluate_pipeline import (
+        DEFAULT_COSINE_WEIGHT,
+        DEFAULT_ENGAGEMENT_WEIGHT,
+        _resolve_blend_weights,
+    )
+
+    cosine, engagement = _resolve_blend_weights(None, None)
+    assert cosine == DEFAULT_COSINE_WEIGHT == 0.6
+    assert engagement == DEFAULT_ENGAGEMENT_WEIGHT == 0.4
+
+
+def test_blend_custom_weights_change_reranking() -> None:
+    """The blend knob must actually change the ranking. Pure-cosine (1.0, 0.0)
+    and pure-engagement (0.0, 1.0) configurations must produce opposite orderings
+    when the cosine and engagement signals point in opposite directions."""
+    from scripts.evaluate_pipeline import _rerank_full_pipeline
+
+    retrieved = [("A_high_cosine_low_eng", 0.9), ("B_low_cosine_high_eng", 0.5)]
+    candidate_index = {
+        "A_high_cosine_low_eng": {
+            "video_id": "A_high_cosine_low_eng",
+            "targets_z": {"engagement": 1.0},
+        },
+        "B_low_cosine_high_eng": {
+            "video_id": "B_low_cosine_high_eng",
+            "targets_z": {"engagement": 2.0},
+        },
+    }
+
+    pure_cosine = [
+        vid for vid, _ in _rerank_full_pipeline(
+            retrieved, candidate_index, cosine_weight=1.0, engagement_weight=0.0,
+        )
+    ]
+    pure_engagement = [
+        vid for vid, _ in _rerank_full_pipeline(
+            retrieved, candidate_index, cosine_weight=0.0, engagement_weight=1.0,
+        )
+    ]
+    # Pure cosine ranks by retrieval similarity; pure engagement flips it.
+    assert pure_cosine[0] == "A_high_cosine_low_eng"
+    assert pure_engagement[0] == "B_low_cosine_high_eng"
+    assert pure_cosine != pure_engagement
+
+
+@pytest.mark.parametrize(
+    ("cosine", "engagement"),
+    [
+        (0.5, 0.6),     # sums to 1.1
+        (-0.1, 1.1),    # negative cosine
+        (1.5, -0.5),    # > 1.0
+    ],
+)
+def test_blend_invalid_weights_raise(cosine, engagement) -> None:
+    from scripts.evaluate_pipeline import _validate_blend_weights
+
+    with pytest.raises(ValueError):
+        _validate_blend_weights(cosine, engagement)
+
+
+def test_blend_env_var_override(monkeypatch) -> None:
+    """Env vars override the defaults when no CLI value is supplied."""
+    from scripts.evaluate_pipeline import _resolve_blend_weights
+
+    monkeypatch.setenv("RANKER_COSINE_WEIGHT", "0.3")
+    monkeypatch.setenv("RANKER_ENGAGEMENT_WEIGHT", "0.7")
+    cosine, engagement = _resolve_blend_weights(None, None)
+    assert cosine == pytest.approx(0.3)
+    assert engagement == pytest.approx(0.7)
+
+
+def test_blend_cli_beats_env(monkeypatch) -> None:
+    """CLI value wins over env var when both are set."""
+    from scripts.evaluate_pipeline import _resolve_blend_weights
+
+    monkeypatch.setenv("RANKER_COSINE_WEIGHT", "0.3")
+    monkeypatch.setenv("RANKER_ENGAGEMENT_WEIGHT", "0.7")
+    cosine, engagement = _resolve_blend_weights(0.5, 0.5)
+    assert cosine == pytest.approx(0.5)
+    assert engagement == pytest.approx(0.5)
+
+
 def test_evaluate_pipeline_output_has_required_keys(tmp_path) -> None:
     """Smoke test: the pipeline JSON must contain the keys the report cites."""
     from scripts import evaluate_pipeline as evp

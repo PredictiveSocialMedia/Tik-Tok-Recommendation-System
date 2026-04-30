@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -54,6 +55,53 @@ from src.recommendation.learning.evaluator import (  # noqa: E402
     ndcg_at_k,
     recall_at_k,
 )
+
+
+# ---------------------------------------------------------------------------
+# Reranker blend configuration
+# ---------------------------------------------------------------------------
+# Default weights for the cosine + engagement_z blend. Backwards-compatible
+# with the original hardcoded values. Override via:
+#   1. CLI flags --cosine-weight / --engagement-weight (highest precedence)
+#   2. Environment vars RANKER_COSINE_WEIGHT / RANKER_ENGAGEMENT_WEIGHT
+#   3. These constants (lowest precedence)
+DEFAULT_COSINE_WEIGHT = 0.6
+DEFAULT_ENGAGEMENT_WEIGHT = 0.4
+
+
+def _validate_blend_weights(cosine_weight: float, engagement_weight: float) -> None:
+    """Both weights must be in [0, 1] and sum to 1.0 within float tolerance."""
+    if not (0.0 <= cosine_weight <= 1.0):
+        raise ValueError(
+            f"cosine_weight must be in [0, 1]; got {cosine_weight!r}."
+        )
+    if not (0.0 <= engagement_weight <= 1.0):
+        raise ValueError(
+            f"engagement_weight must be in [0, 1]; got {engagement_weight!r}."
+        )
+    total = cosine_weight + engagement_weight
+    if abs(total - 1.0) > 1e-6:
+        raise ValueError(
+            f"cosine_weight ({cosine_weight}) + engagement_weight ({engagement_weight}) "
+            f"must sum to 1.0; got {total}."
+        )
+
+
+def _resolve_blend_weights(
+    cli_cosine: float | None,
+    cli_engagement: float | None,
+) -> Tuple[float, float]:
+    """Resolve blend weights using CLI > env > module defaults precedence."""
+    cosine = cli_cosine
+    if cosine is None:
+        env_value = os.environ.get("RANKER_COSINE_WEIGHT")
+        cosine = float(env_value) if env_value else DEFAULT_COSINE_WEIGHT
+    engagement = cli_engagement
+    if engagement is None:
+        env_value = os.environ.get("RANKER_ENGAGEMENT_WEIGHT")
+        engagement = float(env_value) if env_value else DEFAULT_ENGAGEMENT_WEIGHT
+    _validate_blend_weights(cosine, engagement)
+    return cosine, engagement
 
 
 # ---------------------------------------------------------------------------
@@ -232,9 +280,10 @@ def _retrieve(
 def _rerank_full_pipeline(
     retrieved: Sequence[Tuple[str, float]],
     candidate_index: Dict[str, Dict[str, Any]],
-    cosine_weight: float = 0.6,
-    engagement_weight: float = 0.4,
+    cosine_weight: float = DEFAULT_COSINE_WEIGHT,
+    engagement_weight: float = DEFAULT_ENGAGEMENT_WEIGHT,
 ) -> List[Tuple[str, float]]:
+    _validate_blend_weights(cosine_weight, engagement_weight)
     if not retrieved:
         return []
     cosines = np.array([s for _, s in retrieved], dtype=np.float32)
@@ -257,6 +306,8 @@ def _evaluate_pass(
     candidate_pool: Sequence[Dict[str, Any]],
     k_values: Sequence[int],
     rerank: bool,
+    cosine_weight: float = DEFAULT_COSINE_WEIGHT,
+    engagement_weight: float = DEFAULT_ENGAGEMENT_WEIGHT,
 ) -> Tuple[Dict[str, float], int]:
     candidate_ids = [str(c["video_id"]) for c in candidate_pool]
     candidate_index = {str(c["video_id"]): c for c in candidate_pool}
@@ -275,7 +326,12 @@ def _evaluate_pass(
             continue
         retrieved = _retrieve(_row_text(query), vocab, doc_matrix, candidate_ids, top_n)
         if rerank:
-            retrieved = _rerank_full_pipeline(retrieved, candidate_index)
+            retrieved = _rerank_full_pipeline(
+                retrieved,
+                candidate_index,
+                cosine_weight=cosine_weight,
+                engagement_weight=engagement_weight,
+            )
         ranked_ids = [vid for vid, _ in retrieved]
         for k in k_values:
             metrics_per_k[k]["ndcg"].append(ndcg_at_k(ranked_ids, graded, k))
@@ -336,7 +392,33 @@ def main() -> int:
         default=None,
         help="If set, evaluate only the first N test queries (useful for smoke runs).",
     )
+    parser.add_argument(
+        "--cosine-weight",
+        type=float,
+        default=None,
+        help=(
+            "Override the cosine weight in the full-pipeline reranker blend. "
+            f"Falls back to RANKER_COSINE_WEIGHT env var, then to {DEFAULT_COSINE_WEIGHT}."
+        ),
+    )
+    parser.add_argument(
+        "--engagement-weight",
+        type=float,
+        default=None,
+        help=(
+            "Override the engagement_z weight in the full-pipeline reranker blend. "
+            f"Falls back to RANKER_ENGAGEMENT_WEIGHT env var, then to {DEFAULT_ENGAGEMENT_WEIGHT}."
+        ),
+    )
     args = parser.parse_args()
+
+    try:
+        cosine_weight, engagement_weight = _resolve_blend_weights(
+            args.cosine_weight, args.engagement_weight
+        )
+    except ValueError as exc:
+        print(f"Invalid blend weights: {exc}", file=sys.stderr)
+        return 2
 
     k_values = [int(x) for x in args.k_values.split(",") if x.strip()]
     train = _load_jsonl(args.splits_dir / "train.jsonl")
@@ -354,7 +436,13 @@ def main() -> int:
         "retrieval_only", test, candidate_pool, k_values, rerank=False
     )
     full_metrics, full_queries = _evaluate_pass(
-        "full_pipeline", test, candidate_pool, k_values, rerank=True
+        "full_pipeline",
+        test,
+        candidate_pool,
+        k_values,
+        rerank=True,
+        cosine_weight=cosine_weight,
+        engagement_weight=engagement_weight,
     )
     queries_used = max(retrieval_queries, full_queries)
 
@@ -367,7 +455,10 @@ def main() -> int:
         "config": {
             "k_values": k_values,
             "retriever": "tfidf_cosine",
-            "ranker_blend": {"cosine_weight": 0.6, "engagement_weight": 0.4},
+            "ranker_blend": {
+                "cosine_weight": cosine_weight,
+                "engagement_weight": engagement_weight,
+            },
             "relevance_proxy": (
                 "candidate shares >=1 hashtag or top-3 keyword with query AND "
                 "engagement >= median of hashtag bucket"
