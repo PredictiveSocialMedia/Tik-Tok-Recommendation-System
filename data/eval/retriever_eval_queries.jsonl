@@ -1,0 +1,20 @@
+{"query": "pet training and animal care", "expected_docs": ["v0001"]}
+{"query": "dogs and cats diy pets", "expected_docs": ["v0001"]}
+{"query": "finance investing money tips", "expected_docs": ["v0002"]}
+{"query": "how to avoid money mistakes investing", "expected_docs": ["v0002"]}
+{"query": "travel itinerary and adventure photography", "expected_docs": ["v0003"]}
+{"query": "travel tips and exploration guides", "expected_docs": ["v0003"]}
+{"query": "cooking recipes and culinary techniques", "expected_docs": ["v0004"]}
+{"query": "gourmet cooking and food preparation", "expected_docs": ["v0004"]}
+{"query": "fitness workouts and healthy lifestyle", "expected_docs": ["v0005"]}
+{"query": "exercise routines and wellness tips", "expected_docs": ["v0005"]}
+{"query": "technology trends and innovation news", "expected_docs": ["v0006"]}
+{"query": "latest gadgets and tech updates", "expected_docs": ["v0006"]}
+{"query": "mental health and self-care strategies", "expected_docs": ["v0007"]}
+{"query": "stress management and emotional well-being", "expected_docs": ["v0007"]}
+{"query": "education resources and learning techniques", "expected_docs": ["v0008"]}
+{"query": "study tips and academic success strategies", "expected_docs": ["v0008"]}
+{"query": "sports news and athlete profiles", "expected_docs": ["v0009"]}
+{"query": "latest sports updates and player statistics", "expected_docs": ["v0009"]}
+{"query": "entertainment news and celebrity gossip", "expected_docs": ["v0010"]}
+{"query": "movie reviews and celebrity updates", "expected_docs": ["v0010"]}
