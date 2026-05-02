@@ -124,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.output_json is not None:
         args.output_json.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "splits_path": str(args.splits_path),
+            "splits_path": (args.splits_path.relative_to(REPO_ROOT) if args.splits_path.is_relative_to(REPO_ROOT) else args.splits_path).as_posix(),
             "n_rows_loaded": len(rows),
             "objectives": list(args.objectives),
             "k_values": list(k_values),
