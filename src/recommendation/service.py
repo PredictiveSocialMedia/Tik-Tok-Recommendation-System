@@ -19,6 +19,7 @@ except Exception as exc:  # pragma: no cover - optional dependency
     ) from exc
 
 from .corpus import CorpusResolver, CorpusScopeSpec
+from .learning.artifacts import ArtifactManifestError
 from .learning.inference import (
     ArtifactCompatibilityError,
     RecommenderRuntime,
@@ -304,6 +305,10 @@ def health() -> Dict[str, Any]:
 def compatibility() -> Dict[str, Any]:
     try:
         runtime = _ensure_runtime()
+    except ArtifactManifestError as error:
+        detail = error.to_dict()
+        detail["fallback_mode"] = True
+        raise HTTPException(status_code=503, detail=detail) from error
     except Exception as error:
         raise HTTPException(
             status_code=503,
@@ -320,6 +325,10 @@ def compatibility() -> Dict[str, Any]:
 def recommendations(request: RecommendationRequest) -> Dict[str, Any]:
     try:
         runtime = _ensure_runtime()
+    except ArtifactManifestError as error:
+        detail = error.to_dict()
+        detail["fallback_mode"] = True
+        raise HTTPException(status_code=503, detail=detail) from error
     except Exception as error:
         raise HTTPException(
             status_code=503,
@@ -413,13 +422,11 @@ def recommendations(request: RecommendationRequest) -> Dict[str, Any]:
             },
         ) from error
     except ArtifactCompatibilityError as error:
+        detail = error.to_dict()
+        detail["fallback_mode"] = True
         raise HTTPException(
             status_code=409,
-            detail={
-                "error": "incompatible_artifact",
-                "fallback_mode": True,
-                "reason": str(error),
-            },
+            detail=detail,
         ) from error
     except RecommenderStageTimeoutError as error:
         raise HTTPException(

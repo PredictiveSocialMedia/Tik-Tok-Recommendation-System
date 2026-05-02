@@ -1,4 +1,4 @@
-.PHONY: lint test ci validate-data generate-mock baseline datamart feature-snapshot fabric-hourly fabric-daily comment-snapshot comment-priors comment-hourly comment-daily eval-fabric-rollout eval-comment-rollout train-recommender eval-recommender eval-recommender-ablation serve-recommender refresh-serving-bundle bootstrap-embedding benchmark-recommender build-retriever fit-retriever-fusion eval-retriever-only eval outcome-attribution drift-monitor retrain-controller experiment-analysis live-e2e-validate ab-test
+.PHONY: lint test ci validate-data generate-mock baseline datamart feature-snapshot fabric-hourly fabric-daily comment-snapshot comment-priors comment-hourly comment-daily eval-fabric-rollout eval-comment-rollout train-recommender eval-recommender eval-recommender-ablation serve-recommender refresh-serving-bundle bootstrap-embedding benchmark-recommender build-retriever fit-retriever-fusion eval-retriever-only eval outcome-attribution drift-monitor retrain-controller experiment-analysis live-e2e-validate train-engagement-predictor compare-rankers ab-test
 
 # Lint only tests for Sprint 1 (repo has known scaffold lint debt elsewhere).
 lint:
@@ -102,3 +102,7 @@ live-e2e-validate:
 
 ab-test:
 	PYTHONPATH=. python3 scripts/run_ab_test.py --output-json artifacts/control_plane/ab_test_report.json
+compare-rankers:
+	PYTHONPATH=. python3 scripts/compare_lightgbm_vs_heuristic.py --output-json artifacts/control_plane/ranker_comparison_metrics.json
+train-engagement-predictor:
+	PYTHONPATH=. python3 scripts/train_engagement_predictor.py --output-json artifacts/control_plane/engagement_predictor_metrics.json
