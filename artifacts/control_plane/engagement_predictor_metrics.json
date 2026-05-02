@@ -1,6 +1,6 @@
 {
-  "train_path": "D:\\ipaz\\Dev\\Intelij\\Programs\\WebStorm\\Projects\\Tiktok scraper\\data\\splits\\train.jsonl",
-  "test_path": "D:\\ipaz\\Dev\\Intelij\\Programs\\WebStorm\\Projects\\Tiktok scraper\\data\\splits\\test.jsonl",
+  "train_path": "data/splits/train.jsonl",
+  "test_path": "data/splits/test.jsonl",
   "n_train_rows": 511,
   "n_test_rows": 111,
   "targets": [
