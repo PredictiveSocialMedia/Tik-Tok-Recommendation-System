@@ -1,5 +1,5 @@
 {
-  "splits_path": "D:\\ipaz\\Dev\\Intelij\\Programs\\WebStorm\\Projects\\Tiktok scraper\\data\\splits\\test.jsonl",
+  "splits_path": "data/splits/test.jsonl",,
   "n_rows_loaded": 111,
   "objectives": [
     "reach",
