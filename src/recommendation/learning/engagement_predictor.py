@@ -1,17 +1,12 @@
 """
 Engagement prediction from metadata signals.
 
-Implements suggestion #9 from the prof's email:
-  "Improve the video analysis pipeline by adding engagement prediction
-  from metadata signals (views, likes, comments)."
-
 Trains per-target gradient-boosted regressors on metadata features
 (caption stats, hashtag/keyword counts, duration, content type, posted
 hour / day-of-week) and predicts:
 
   - log_views          (future_reach_log_delta = log(future_views))
   - engagement_rate    (future_engagement_rate ≈ likes+comments / views)
-  - shares_per_1k      (future_shares_per_1k_views)
 
 All feature extraction is pure-function so the unit tests don't need
 sklearn fixtures. Metrics: MAE, RMSE, R², Spearman rank correlation,
@@ -36,7 +31,7 @@ ENGAGEMENT_PREDICTOR_VERSION = "engagement_predictor.v1"
 CONTENT_TYPES: Tuple[str, ...] = ("general", "tutorial", "review", "story", "other")
 
 # Targets the predictor knows how to extract from a row's labels.
-SUPPORTED_TARGETS: Tuple[str, ...] = ("log_views", "engagement_rate", "shares_per_1k")
+SUPPORTED_TARGETS: Tuple[str, ...] = ("log_views", "engagement_rate")
 DEFAULT_TARGETS: Tuple[str, ...] = ("log_views", "engagement_rate")
 
 
@@ -110,10 +105,8 @@ def extract_target(row: Dict[str, Any], target: str) -> Optional[float]:
         return None
     if target == "log_views":
         raw = labels.get("future_reach_log_delta")
-    elif target == "engagement_rate":
+    else:  # engagement_rate
         raw = labels.get("future_engagement_rate")
-    else:  # shares_per_1k
-        raw = labels.get("future_shares_per_1k_views")
     if raw is None:
         return None
     try:
