@@ -21,6 +21,11 @@ from src.recommendation.learning import (
     map_objective,
     train_recommender_from_datamart,
 )
+from src.recommendation.learning.artifacts import (
+    ArtifactManifestParseError,
+    ArtifactManifestValidationError,
+    RECOMMENDER_BUNDLE_MANIFEST_SCHEMA,
+)
 from src.recommendation.learning.inference import ArtifactCompatibilityError
 
 
@@ -246,11 +251,83 @@ def test_artifact_registry_compatibility_check(tmp_path: Path):
         bundle_dir,
         {"feature_schema_hash": manifest["feature_schema_hash"]},
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ArtifactCompatibilityError) as exc_info:
         registry.assert_compatible(
             bundle_dir,
             {"feature_schema_hash": "bad-hash"},
         )
+    detail = exc_info.value.to_dict()
+    assert detail["error"] == "incompatible_artifact"
+    assert detail["reason_code"] == "artifact_compatibility_mismatch"
+    assert detail["issues"][0]["field"] == "feature_schema_hash"
+
+
+def test_artifact_registry_validates_recommender_manifest_schema(tmp_path: Path):
+    bundle_dir = tmp_path / "bad-bundle"
+    bundle_dir.mkdir()
+    (bundle_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "component": "recommender-learning-v1",
+                "contract_version": "contract.v2",
+                "datamart_version": "datamart.v1",
+                "feature_schema_hash": "",
+                "retrieve_k": "fifty",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    registry = ArtifactRegistry(tmp_path)
+    with pytest.raises(ArtifactManifestValidationError) as exc_info:
+        registry.load_manifest(bundle_dir, schema=RECOMMENDER_BUNDLE_MANIFEST_SCHEMA)
+
+    detail = exc_info.value.to_dict()
+    issues_by_field = {item["field"]: item for item in detail["issues"]}
+    assert detail["error"] == "invalid_artifact_manifest"
+    assert detail["reason_code"] == "artifact_manifest_validation_failed"
+    assert issues_by_field["objectives"]["code"] == "manifest_missing_required_field"
+    assert issues_by_field["feature_schema_hash"]["code"] == "manifest_empty_field"
+    assert issues_by_field["retrieve_k"]["code"] == "manifest_invalid_field_type"
+
+
+def test_artifact_registry_reports_manifest_json_parse_error(tmp_path: Path):
+    bundle_dir = tmp_path / "bad-json"
+    bundle_dir.mkdir()
+    (bundle_dir / "manifest.json").write_text("{not-json", encoding="utf-8")
+
+    registry = ArtifactRegistry(tmp_path)
+    with pytest.raises(ArtifactManifestParseError) as exc_info:
+        registry.load_recommender_bundle_manifest(bundle_dir)
+
+    detail = exc_info.value.to_dict()
+    assert detail["error"] == "invalid_artifact_manifest"
+    assert detail["reason_code"] == "artifact_manifest_parse_error"
+    assert detail["issues"][0]["code"] == "manifest_invalid_json"
+
+
+def test_runtime_rejects_invalid_manifest_with_structured_error(tmp_path: Path):
+    bundle_dir = tmp_path / "invalid-runtime-bundle"
+    bundle_dir.mkdir()
+    (bundle_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "component": "recommender-learning-v1",
+                "contract_version": "contract.v2",
+                "datamart_version": "datamart.v1",
+                "feature_schema_hash": "abc123",
+                "objectives": "engagement",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ArtifactManifestValidationError) as exc_info:
+        RecommenderRuntime(bundle_dir=bundle_dir)
+
+    detail = exc_info.value.to_dict()
+    assert detail["issues"][0]["field"] == "objectives"
+    assert detail["issues"][0]["code"] == "manifest_invalid_field_type"
 
 
 def test_recommender_runtime_community_objective_returns_effective_model(tmp_path: Path):
