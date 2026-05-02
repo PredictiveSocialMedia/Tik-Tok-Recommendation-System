@@ -1,4 +1,16 @@
-from .artifacts import ArtifactRegistry
+from .artifacts import (
+    ArtifactCompatibilityError,
+    ArtifactManifestError,
+    ArtifactManifestNotFoundError,
+    ArtifactManifestParseError,
+    ArtifactManifestSchema,
+    ArtifactManifestValidationError,
+    ArtifactRegistry,
+    ManifestFieldRule,
+    ManifestValidationIssue,
+    RECOMMENDER_BUNDLE_MANIFEST_SCHEMA,
+    validate_manifest,
+)
 from .bootstrap_pairwise import materialize_datamart_bootstrap_rows
 from .feedback_pairwise import (
     materialize_pairwise_rows,
@@ -62,6 +74,16 @@ from .trajectory import (
 
 __all__ = [
     "ArtifactRegistry",
+    "ArtifactCompatibilityError",
+    "ArtifactManifestError",
+    "ArtifactManifestNotFoundError",
+    "ArtifactManifestParseError",
+    "ArtifactManifestSchema",
+    "ArtifactManifestValidationError",
+    "ManifestFieldRule",
+    "ManifestValidationIssue",
+    "RECOMMENDER_BUNDLE_MANIFEST_SCHEMA",
+    "validate_manifest",
     "HUMAN_COMPARABLE_BENCHMARK_VERSION",
     "HUMAN_COMPARABLE_BENCHMARK_RUBRIC_VERSION",
     "LABEL_GOOD",
