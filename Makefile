@@ -1,4 +1,4 @@
-.PHONY: lint test ci validate-data generate-mock baseline datamart feature-snapshot fabric-hourly fabric-daily comment-snapshot comment-priors comment-hourly comment-daily eval-fabric-rollout eval-comment-rollout train-recommender eval-recommender eval-recommender-ablation serve-recommender refresh-serving-bundle bootstrap-embedding benchmark-recommender build-retriever fit-retriever-fusion eval-retriever-only eval outcome-attribution drift-monitor retrain-controller experiment-analysis live-e2e-validate
+.PHONY: lint test ci validate-data generate-mock baseline datamart feature-snapshot fabric-hourly fabric-daily comment-snapshot comment-priors comment-hourly comment-daily eval-fabric-rollout eval-comment-rollout train-recommender eval-recommender eval-recommender-ablation serve-recommender refresh-serving-bundle bootstrap-embedding benchmark-recommender build-retriever fit-retriever-fusion eval-retriever-only eval outcome-attribution drift-monitor retrain-controller experiment-analysis live-e2e-validate eval-trajectory-held-out
 
 # Lint only tests for Sprint 1 (repo has known scaffold lint debt elsewhere).
 lint:
@@ -99,3 +99,6 @@ experiment-analysis:
 
 live-e2e-validate:
 	PYTHONPATH=. python3 scripts/run_live_e2e_validation.py --launch-python --launch-node --inject-compat-mismatch --inject-python-down --run-control-plane --db-url $$DATABASE_URL --output-json artifacts/control_plane/live_e2e_validation_report.json
+
+eval-trajectory-held-out:
+	PYTHONPATH=. python3 scripts/eval_trajectory_held_out.py --output-json artifacts/control_plane/trajectory_eval_metrics.json
