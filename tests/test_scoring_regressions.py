@@ -18,8 +18,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from src.recommendation.learning.baseline_common import jaccard
-from src.recommendation.learning.evaluator import (
+from src.recommendation.learning.baseline_common import jaccard  # noqa: E402
+from src.recommendation.learning.evaluator import (  # noqa: E402
     aggregate,
     mrr_at_k,
     ndcg_at_k,
