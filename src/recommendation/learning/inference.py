@@ -12,7 +12,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from src.common.config import settings
 
-from .artifacts import ArtifactRegistry
+from .artifacts import (
+    ArtifactCompatibilityError,
+    ArtifactRegistry,
+    ManifestValidationIssue,
+)
 from .baseline_common import (
     BASELINE_CALIBRATION_VERSION,
     BASELINE_COMMENT_VERSION,
@@ -77,10 +81,6 @@ from ..fabric import FeatureFabric
 
 
 class RoutingContractError(ValueError):
-    pass
-
-
-class ArtifactCompatibilityError(ValueError):
     pass
 
 
@@ -833,19 +833,7 @@ class RecommenderRuntime:
         self.config = config or RecommenderRuntimeConfig()
 
         registry = ArtifactRegistry(bundle_dir.parent)
-        manifest = registry.load_manifest(bundle_dir)
-        required_fields = (
-            "component",
-            "contract_version",
-            "datamart_version",
-            "feature_schema_hash",
-            "objectives",
-        )
-        missing = [field for field in required_fields if field not in manifest]
-        if missing:
-            raise ValueError(
-                f"Invalid recommender artifact manifest. Missing fields: {', '.join(missing)}"
-            )
+        manifest = registry.load_recommender_bundle_manifest(bundle_dir)
 
         expected: Dict[str, Any] = {}
         if self.config.component:
@@ -857,10 +845,7 @@ class RecommenderRuntime:
         if self.config.datamart_version:
             expected["datamart_version"] = self.config.datamart_version
         if expected:
-            try:
-                registry.assert_compatible(bundle_dir, expected)
-            except ValueError as error:
-                raise ArtifactCompatibilityError(str(error)) from error
+            registry.assert_compatible(bundle_dir, expected, manifest=manifest)
 
         self.manifest = manifest
         self.bundle_id = str(
@@ -874,14 +859,49 @@ class RecommenderRuntime:
             and expected_fabric_signature
             and self.fabric.registry.signature() != expected_fabric_signature
         ):
-            raise ValueError(
-                "Fabric registry signature mismatch between runtime and artifact manifest."
+            actual_signature = self.fabric.registry.signature()
+            raise ArtifactCompatibilityError(
+                "Fabric registry signature mismatch between runtime and artifact manifest.",
+                manifest_path=registry.manifest_path(bundle_dir),
+                issues=[
+                    ManifestValidationIssue(
+                        code="artifact_compatibility_mismatch",
+                        field="fabric_registry_signature",
+                        message=(
+                            "fabric_registry_signature: "
+                            f"expected={expected_fabric_signature!r}, "
+                            f"actual={actual_signature!r}"
+                        ),
+                        expected=expected_fabric_signature,
+                        actual=actual_signature,
+                    )
+                ],
             )
         expected_fabric_schema_hashes = manifest.get("fabric_schema_hashes")
-        if isinstance(expected_fabric_schema_hashes, dict) and expected_fabric_schema_hashes:
-            self.fabric.registry.assert_compatible(
-                {str(key): str(value) for key, value in expected_fabric_schema_hashes.items()}
-            )
+        if (
+            isinstance(expected_fabric_schema_hashes, dict)
+            and expected_fabric_schema_hashes
+        ):
+            expected_hashes = {
+                str(key): str(value)
+                for key, value in expected_fabric_schema_hashes.items()
+            }
+            try:
+                self.fabric.registry.assert_compatible(expected_hashes)
+            except ValueError as error:
+                raise ArtifactCompatibilityError(
+                    "Fabric schema compatibility check failed: " + str(error),
+                    manifest_path=registry.manifest_path(bundle_dir),
+                    issues=[
+                        ManifestValidationIssue(
+                            code="artifact_compatibility_mismatch",
+                            field="fabric_schema_hashes",
+                            message=str(error),
+                            expected=expected_hashes,
+                            actual=self.fabric.registry.signature(),
+                        )
+                    ],
+                ) from error
 
         self.graph_bundle_id = str(
             (
@@ -1341,13 +1361,29 @@ class RecommenderRuntime:
             )
         compatibility = self.compatibility_payload(required_compat=required_compat)
         if not bool(compatibility.get("ok", False)):
+            issues = [
+                ManifestValidationIssue(
+                    code="artifact_compatibility_mismatch",
+                    field=str(item.get("key") or ""),
+                    message=(
+                        f"{item.get('key')} expected={item.get('expected')!r} "
+                        f"actual={item.get('actual')!r}"
+                    ),
+                    expected=item.get("expected"),
+                    actual=item.get("actual"),
+                )
+                for item in compatibility.get("mismatches", [])
+                if isinstance(item, dict)
+            ]
             raise ArtifactCompatibilityError(
                 "incompatible_artifact: "
                 + " | ".join(
                     f"{item['key']} expected={item['expected']!r} actual={item['actual']!r}"
                     for item in compatibility.get("mismatches", [])
                     if isinstance(item, dict)
-                )
+                ),
+                manifest_path=self.bundle_dir / "manifest.json",
+                issues=issues,
             )
         return {
             "objective_requested": requested_objective,

@@ -15,16 +15,8 @@ laptop in under a second without loading any model artifacts.
 
 from __future__ import annotations
 
-
-from pathlib import Path
-import sys
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-import numpy as np  # noqa: E402
-import pytest  # noqa: E402
+import numpy as np
+import pytest
 
 from src.recommendation.learning.baseline_common import jaccard  # noqa: E402
 from src.recommendation.learning.evaluator import (  # noqa: E402
