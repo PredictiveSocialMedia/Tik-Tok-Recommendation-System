@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import random
 import sys
 from dataclasses import asdict, dataclass, field
@@ -41,13 +42,25 @@ from .ranking_baseline import rank_shortlist, score_components_for_candidate
 from .retrieval_baseline import retrieve_shortlist
 from .retriever import HybridRetriever, HybridRetrieverTrainerConfig
 from .sampling import NegativeSampler, NegativeSamplerConfig
-from .temporal import TemporalCandidatePool, TemporalCandidatePoolConfig, parse_dt, row_text, split_rows
+from .temporal import (
+    TemporalCandidatePool,
+    TemporalCandidatePoolConfig,
+    parse_dt,
+    row_text,
+    split_rows,
+)
 from .trajectory import (
     TRAJECTORY_VERSION,
     TrajectoryBuildConfig,
     TrajectoryBundle,
     annotate_rows_with_trajectory_features,
     build_trajectory_bundle,
+)
+from ..control_plane import (
+    DriftThresholds,
+    ks_statistic,
+    population_stability_index,
+    relative_mean_delta,
 )
 from ..fabric import FeatureFabric
 
@@ -70,6 +83,18 @@ BASELINE_RANKER_FEATURE_NAMES = [
     "retrieval_fused",
     "support_score",
 ]
+ARTIFACT_DRIFT_SIGNALS_VERSION = "artifact_drift_signals.v1"
+ARTIFACT_DRIFT_FEATURE_KEYS = (
+    "mandatory_caption_word_count",
+    "mandatory_hashtag_count",
+    "mandatory_keyword_count",
+    "mandatory_duration_seconds",
+    "mandatory_text_token_count",
+    "optional_pre_views_log1p",
+    "optional_pre_engagement_rate",
+    "optional_comment_alignment_score",
+    "optional_comment_artifact_drift_ratio",
+)
 
 
 def _to_utc_iso(value: Any) -> Optional[str]:
@@ -82,6 +107,343 @@ def _to_utc_iso(value: Any) -> Optional[str]:
 
 def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _safe_float_or_none(value: Any) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        return None
+    return parsed
+
+
+def _distribution_profile(values: Sequence[float]) -> Dict[str, Any]:
+    numeric = sorted(float(value) for value in values if math.isfinite(float(value)))
+    count = len(numeric)
+    if not numeric:
+        return {
+            "count": 0,
+            "mean": 0.0,
+            "std": 0.0,
+            "min": 0.0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0.0,
+        }
+
+    mean_value = sum(numeric) / max(1, count)
+    variance = sum((value - mean_value) ** 2 for value in numeric) / max(1, count)
+
+    def _percentile(fraction: float) -> float:
+        if count == 1:
+            return numeric[0]
+        position = max(0.0, min(1.0, fraction)) * float(count - 1)
+        lower = int(math.floor(position))
+        upper = int(math.ceil(position))
+        if lower == upper:
+            return numeric[lower]
+        weight = position - float(lower)
+        return numeric[lower] * (1.0 - weight) + numeric[upper] * weight
+
+    return {
+        "count": int(count),
+        "mean": round_score(mean_value),
+        "std": round_score(math.sqrt(max(0.0, variance))),
+        "min": round_score(numeric[0]),
+        "p50": round_score(_percentile(0.50)),
+        "p95": round_score(_percentile(0.95)),
+        "max": round_score(numeric[-1]),
+    }
+
+
+def _row_features(row: Dict[str, Any]) -> Dict[str, Any]:
+    features = row.get("features")
+    return features if isinstance(features, dict) else {}
+
+
+def _append_feature_value(
+    out: Dict[str, List[float]],
+    key: str,
+    value: Any,
+) -> None:
+    parsed = _safe_float_or_none(value)
+    if parsed is not None:
+        out[key].append(float(parsed))
+
+
+def _collect_artifact_drift_feature_values(
+    rows: Sequence[Dict[str, Any]]
+) -> Dict[str, List[float]]:
+    out: Dict[str, List[float]] = {key: [] for key in ARTIFACT_DRIFT_FEATURE_KEYS}
+    for row in rows:
+        features = _row_features(row)
+        caption_word_count = _safe_float_or_none(features.get("caption_word_count"))
+        if caption_word_count is None:
+            caption_word_count = float(len(str(row.get("caption") or "").split()))
+        out["mandatory_caption_word_count"].append(float(caption_word_count))
+        out["mandatory_hashtag_count"].append(float(len(list(row.get("hashtags") or []))))
+        out["mandatory_keyword_count"].append(float(len(list(row.get("keywords") or []))))
+        out["mandatory_text_token_count"].append(float(len(row_text(row).split())))
+        duration_seconds = features.get("duration_seconds")
+        if duration_seconds is None:
+            duration_seconds = row.get("duration_seconds")
+        _append_feature_value(
+            out,
+            "mandatory_duration_seconds",
+            duration_seconds,
+        )
+
+        pre_metrics = features.get("pre_metrics")
+        pre_metrics = pre_metrics if isinstance(pre_metrics, dict) else {}
+        views = _safe_float_or_none(pre_metrics.get("views"))
+        if views is not None:
+            out["optional_pre_views_log1p"].append(math.log1p(max(0.0, views)))
+            if views > 0:
+                likes = _safe_float_or_none(pre_metrics.get("likes")) or 0.0
+                comments = _safe_float_or_none(pre_metrics.get("comments_count")) or 0.0
+                shares = _safe_float_or_none(pre_metrics.get("shares")) or 0.0
+                out["optional_pre_engagement_rate"].append(
+                    float((likes + comments + shares) / max(1.0, views))
+                )
+
+        comment_features = features.get("comment_intelligence")
+        comment_features = comment_features if isinstance(comment_features, dict) else {}
+        _append_feature_value(
+            out,
+            "optional_comment_alignment_score",
+            comment_features.get("alignment_score"),
+        )
+        _append_feature_value(
+            out,
+            "optional_comment_artifact_drift_ratio",
+            comment_features.get("artifact_drift_ratio"),
+        )
+    return out
+
+
+def _collect_artifact_drift_label_values(
+    rows: Sequence[Dict[str, Any]],
+    objective: str,
+) -> List[float]:
+    out: List[float] = []
+    for row in rows:
+        targets = row.get("targets_z")
+        if not isinstance(targets, dict):
+            continue
+        parsed = _safe_float_or_none(targets.get(objective))
+        if parsed is not None:
+            out.append(parsed)
+    return out
+
+
+def _drift_feature_threshold(key: str, thresholds: DriftThresholds) -> float:
+    if key.startswith("mandatory_"):
+        return float(thresholds.feature_psi_mandatory)
+    return float(thresholds.feature_psi_optional)
+
+
+def _artifact_drift_severity(
+    *,
+    mandatory_feature_breach: bool,
+    optional_feature_breach: bool,
+    label_breach: bool,
+    support_sufficient: bool,
+) -> str:
+    if mandatory_feature_breach or label_breach:
+        return "critical"
+    if optional_feature_breach:
+        return "warning"
+    if not support_sufficient:
+        return "insufficient_data"
+    return "ok"
+
+
+def _combine_drift_severities(severities: Sequence[str]) -> str:
+    priority = {
+        "critical": 4,
+        "warning": 3,
+        "insufficient_data": 2,
+        "ok": 1,
+    }
+    if not severities:
+        return "insufficient_data"
+    return max(severities, key=lambda value: priority.get(str(value), 0))
+
+
+def _artifact_drift_recommendation(severity: str) -> str:
+    if severity in {"critical", "warning"}:
+        return "review_training_distribution"
+    if severity == "insufficient_data":
+        return "collect_more_split_data"
+    return "none"
+
+
+def _build_artifact_drift_signals(
+    *,
+    rows_split: Dict[str, List[Dict[str, Any]]],
+    objectives: Sequence[str],
+    thresholds: DriftThresholds = DriftThresholds(),
+) -> Dict[str, Any]:
+    comparison_splits = ("validation", "test")
+    baseline_split = "train"
+    feature_values_by_split = {
+        split: _collect_artifact_drift_feature_values(rows_split.get(split, []))
+        for split in (baseline_split, *comparison_splits)
+    }
+    label_values_by_split = {
+        split: {
+            objective: _collect_artifact_drift_label_values(
+                rows_split.get(split, []),
+                objective,
+            )
+            for objective in objectives
+        }
+        for split in (baseline_split, *comparison_splits)
+    }
+    feature_profiles = {
+        split: {
+            key: _distribution_profile(values)
+            for key, values in feature_values.items()
+        }
+        for split, feature_values in feature_values_by_split.items()
+    }
+    label_profiles = {
+        split: {
+            objective: _distribution_profile(values)
+            for objective, values in objective_values.items()
+        }
+        for split, objective_values in label_values_by_split.items()
+    }
+
+    split_drift: Dict[str, Any] = {}
+    split_severities: List[str] = []
+    baseline_features = feature_values_by_split.get(baseline_split, {})
+    baseline_labels = label_values_by_split.get(baseline_split, {})
+    for split in comparison_splits:
+        feature_drift: Dict[str, Dict[str, Any]] = {}
+        feature_support_sufficient = False
+        mandatory_feature_breach = False
+        optional_feature_breach = False
+        for key in ARTIFACT_DRIFT_FEATURE_KEYS:
+            expected_values = baseline_features.get(key, [])
+            actual_values = feature_values_by_split.get(split, {}).get(key, [])
+            expected_count = len(expected_values)
+            actual_count = len(actual_values)
+            support_ok = (
+                expected_count >= max(1, int(thresholds.min_feature_samples))
+                and actual_count >= max(1, int(thresholds.min_feature_samples))
+            )
+            threshold = _drift_feature_threshold(key, thresholds)
+            psi_value = population_stability_index(expected_values, actual_values)
+            breach = bool(support_ok and psi_value > threshold)
+            if support_ok:
+                feature_support_sufficient = True
+            if breach and key.startswith("mandatory_"):
+                mandatory_feature_breach = True
+            if breach and key.startswith("optional_"):
+                optional_feature_breach = True
+            feature_drift[key] = {
+                "metric": "psi",
+                "value": round_score(psi_value),
+                "threshold": round_score(threshold),
+                "expected_count": int(expected_count),
+                "actual_count": int(actual_count),
+                "min_required": int(max(1, thresholds.min_feature_samples)),
+                "sufficient": bool(support_ok),
+                "breach": bool(breach),
+            }
+
+        label_drift: Dict[str, Dict[str, Any]] = {}
+        label_support_sufficient = False
+        label_breach = False
+        for objective in objectives:
+            expected_values = baseline_labels.get(objective, [])
+            actual_values = label_values_by_split.get(split, {}).get(objective, [])
+            expected_count = len(expected_values)
+            actual_count = len(actual_values)
+            support_ok = (
+                expected_count >= max(1, int(thresholds.min_label_samples))
+                and actual_count >= max(1, int(thresholds.min_label_samples))
+            )
+            ks_value = ks_statistic(expected_values, actual_values)
+            mean_delta = relative_mean_delta(expected_values, actual_values)
+            breach = bool(
+                support_ok
+                and (
+                    ks_value > thresholds.label_ks
+                    or mean_delta > thresholds.label_relative_mean_delta
+                )
+            )
+            if support_ok:
+                label_support_sufficient = True
+            if breach:
+                label_breach = True
+            label_drift[objective] = {
+                "ks": round_score(ks_value),
+                "ks_threshold": round_score(thresholds.label_ks),
+                "relative_mean_delta": round_score(mean_delta),
+                "relative_mean_delta_threshold": round_score(
+                    thresholds.label_relative_mean_delta
+                ),
+                "expected_count": int(expected_count),
+                "actual_count": int(actual_count),
+                "min_required": int(max(1, thresholds.min_label_samples)),
+                "sufficient": bool(support_ok),
+                "breach": bool(breach),
+            }
+
+        support_sufficient = bool(feature_support_sufficient and label_support_sufficient)
+        severity = _artifact_drift_severity(
+            mandatory_feature_breach=mandatory_feature_breach,
+            optional_feature_breach=optional_feature_breach,
+            label_breach=label_breach,
+            support_sufficient=support_sufficient,
+        )
+        split_severities.append(severity)
+        split_drift[split] = {
+            "feature_drift": feature_drift,
+            "label_drift": label_drift,
+            "support": {
+                "features_any_sufficient": bool(feature_support_sufficient),
+                "labels_any_sufficient": bool(label_support_sufficient),
+                "streams_sufficient": bool(support_sufficient),
+            },
+            "breaches": {
+                "feature_mandatory": bool(mandatory_feature_breach),
+                "feature_optional": bool(optional_feature_breach),
+                "label": bool(label_breach),
+            },
+            "severity": severity,
+            "trigger_recommendation": _artifact_drift_recommendation(severity),
+        }
+
+    overall_severity = _combine_drift_severities(split_severities)
+    return {
+        "schema_version": ARTIFACT_DRIFT_SIGNALS_VERSION,
+        "baseline_split": baseline_split,
+        "comparison_splits": list(comparison_splits),
+        "thresholds": {
+            "feature_psi_mandatory": round_score(thresholds.feature_psi_mandatory),
+            "feature_psi_optional": round_score(thresholds.feature_psi_optional),
+            "label_ks": round_score(thresholds.label_ks),
+            "label_relative_mean_delta": round_score(
+                thresholds.label_relative_mean_delta
+            ),
+            "min_feature_samples": int(max(1, thresholds.min_feature_samples)),
+            "min_label_samples": int(max(1, thresholds.min_label_samples)),
+        },
+        "feature_profiles": feature_profiles,
+        "label_profiles": label_profiles,
+        "split_drift": split_drift,
+        "summary": {
+            "overall_severity": overall_severity,
+            "trigger_recommendation": _artifact_drift_recommendation(overall_severity),
+        },
+    }
 
 
 @dataclass
@@ -1432,6 +1794,21 @@ def train_recommender_from_datamart(
 
     retriever.save(retriever_dir)
 
+    drift_signals = _build_artifact_drift_signals(
+        rows_split=rows_split,
+        objectives=trained_objectives,
+    )
+    drift_rel_path = "diagnostics/artifact_drift_signals.json"
+    drift_text = json.dumps(drift_signals, indent=2, ensure_ascii=False)
+    (bundle_dir / drift_rel_path).write_text(drift_text, encoding="utf-8")
+    drift_signals_manifest = {
+        **drift_signals,
+        "report": {
+            "path": drift_rel_path,
+            "sha256": _sha256_text(drift_text),
+        },
+    }
+
     (metrics_dir / "objective_metrics.json").write_text(
         json.dumps(objective_metrics, indent=2, ensure_ascii=False),
         encoding="utf-8",
@@ -1489,6 +1866,7 @@ def train_recommender_from_datamart(
         "policy_reranker": PolicyRerankerConfig().to_payload(),
         "objective_diagnostics": objective_diagnostics_manifest,
         "objective_ablation_reports": objective_ablation_manifest,
+        "drift_signals": drift_signals_manifest,
         "rows_total": len(rows),
         "pair_rows_total": len(pair_rows),
         "train_rows": len(rows_split["train"]),
@@ -1516,4 +1894,5 @@ def train_recommender_from_datamart(
         "bundle_dir": str(bundle_dir),
         "manifest": manifest,
         "objective_metrics": objective_metrics,
+        "drift_signals": drift_signals_manifest,
     }

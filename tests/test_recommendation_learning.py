@@ -225,6 +225,20 @@ def test_train_recommender_from_datamart_creates_baseline_artifacts(tmp_path: Pa
     assert "fabric_schema_hashes" in manifest
     assert "policy_reranker" in manifest
     assert "objective_ablation_reports" in manifest
+    assert "drift_signals" in manifest
+    drift_signals = manifest["drift_signals"]
+    assert drift_signals["schema_version"] == "artifact_drift_signals.v1"
+    assert drift_signals["baseline_split"] == "train"
+    assert drift_signals["comparison_splits"] == ["validation", "test"]
+    assert "mandatory_caption_word_count" in drift_signals["feature_profiles"]["train"]
+    assert "engagement" in drift_signals["label_profiles"]["train"]
+    assert "validation" in drift_signals["split_drift"]
+    assert "test" in drift_signals["split_drift"]
+    assert "feature_drift" in drift_signals["split_drift"]["test"]
+    assert "label_drift" in drift_signals["split_drift"]["test"]
+    assert drift_signals["report"]["path"] == "diagnostics/artifact_drift_signals.json"
+    drift_report_path = bundle_dir / drift_signals["report"]["path"]
+    assert drift_report_path.exists()
     for objective in ("reach", "engagement", "conversion"):
         assert objective in objective_metrics
         assert "retriever" in objective_metrics[objective]

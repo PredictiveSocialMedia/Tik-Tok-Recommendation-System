@@ -347,6 +347,7 @@ RECOMMENDER_BUNDLE_MANIFEST_SCHEMA = ArtifactManifestSchema(
         ManifestFieldRule("policy_reranker", (dict,), allow_none=True),
         ManifestFieldRule("objective_diagnostics", (dict,), allow_none=True),
         ManifestFieldRule("objective_ablation_reports", (dict,), allow_none=True),
+        ManifestFieldRule("drift_signals", (dict,), allow_none=True),
         ManifestFieldRule("retriever", (dict,), allow_none=True),
         ManifestFieldRule("rows_total", (int,), allow_none=True),
         ManifestFieldRule("pair_rows_total", (int,), allow_none=True),
