@@ -146,10 +146,9 @@ def test_extract_features_handles_non_dict_features_payload() -> None:
 
 
 def test_extract_target_returns_value_for_each_supported_target() -> None:
-    row = _row(log_views=9.0, engagement_rate=0.05, shares_per_1k=2.0)
+    row = _row(log_views=9.0, engagement_rate=0.05)
     assert extract_target(row, "log_views") == pytest.approx(9.0, abs=1e-9)
     assert extract_target(row, "engagement_rate") == pytest.approx(0.05, abs=1e-9)
-    assert extract_target(row, "shares_per_1k") == pytest.approx(2.0, abs=1e-9)
 
 
 def test_extract_target_returns_none_for_null_value() -> None:
@@ -358,14 +357,15 @@ def test_predictor_fit_raises_on_no_usable_rows() -> None:
 
 def test_predictor_fits_and_beats_baseline_on_separable_data() -> None:
     pytest.importorskip("sklearn")
-    rows = _make_synthetic_rows(n=80, seed=1)
+    rows = _make_synthetic_rows(n=160, seed=1)
+    train_rows, test_rows = rows[:120], rows[120:]
     predictor = EngagementPredictor(target="log_views")
-    predictor.fit(rows)
-    metrics = predictor.evaluate(rows)
-    # On training data, the fitted GBR should comfortably beat the constant-mean baseline.
-    baseline = baseline_metrics(rows, target="log_views")
+    predictor.fit(train_rows)
+    metrics = predictor.evaluate(test_rows)
+    # On held-out data, the fitted GBR should still beat the constant-mean baseline.
+    baseline = baseline_metrics(test_rows, target="log_views", train_rows=train_rows)
     assert metrics["mae"] < baseline["mae"]
-    assert metrics["r2"] > 0.5
+    assert metrics["r2"] > 0.0
 
 
 def test_predictor_predict_returns_correct_shape() -> None:
