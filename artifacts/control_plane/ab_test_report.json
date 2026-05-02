@@ -1,0 +1,420 @@
+{
+  "train_path": "D:\\ipaz\\Dev\\Intelij\\Programs\\WebStorm\\Projects\\Tiktok scraper\\data\\splits\\train.jsonl",
+  "test_path": "D:\\ipaz\\Dev\\Intelij\\Programs\\WebStorm\\Projects\\Tiktok scraper\\data\\splits\\test.jsonl",
+  "n_train_rows": 511,
+  "n_test_rows": 111,
+  "objectives": [
+    "reach",
+    "engagement",
+    "conversion"
+  ],
+  "k_values": [
+    10,
+    20
+  ],
+  "bootstrap_resamples": 1000,
+  "per_objective": {
+    "reach": {
+      "version": "ab_testing.v1",
+      "n_rows": 111,
+      "n_variants": 3,
+      "k_values": [
+        10,
+        20
+      ],
+      "n_resamples": 1000,
+      "variants": [
+        {
+          "name": "random",
+          "description": "Uniform random scores — sanity-check baseline.",
+          "metrics": {
+            "ndcg@10": 0.41941497358057644,
+            "mrr@10": 0.5,
+            "ndcg@20": 0.45707558711905844,
+            "mrr@20": 0.5
+          }
+        },
+        {
+          "name": "heuristic_v1",
+          "description": "Transparent hand-coded per-objective rules over metadata.",
+          "metrics": {
+            "ndcg@10": 0.4522180212977459,
+            "mrr@10": 1.0,
+            "ndcg@20": 0.5025710127000954,
+            "mrr@20": 1.0
+          }
+        },
+        {
+          "name": "gbr",
+          "description": "sklearn GradientBoostingRegressor trained on the train split predicting targets_z[objective].",
+          "metrics": {
+            "ndcg@10": 0.5836243499550902,
+            "mrr@10": 1.0,
+            "ndcg@20": 0.5482927749793486,
+            "mrr@20": 1.0
+          }
+        }
+      ],
+      "all_pairs_lift": [
+        {
+          "variant_a": "random",
+          "variant_b": "heuristic_v1",
+          "lifts": {
+            "ndcg@10": {
+              "lift_mean": -0.02013647999014688,
+              "lift_ci_low": -0.37529503113966095,
+              "lift_ci_high": 0.33661113113232816,
+              "lift_positive_share": 0.453
+            },
+            "mrr@10": {
+              "lift_mean": -0.3684226190476191,
+              "lift_ci_low": -0.75125,
+              "lift_ci_high": 0.0,
+              "lift_positive_share": 0.0
+            },
+            "ndcg@20": {
+              "lift_mean": -0.02566798405070759,
+              "lift_ci_low": -0.27106983861222395,
+              "lift_ci_high": 0.23054127671726465,
+              "lift_positive_share": 0.416
+            },
+            "mrr@20": {
+              "lift_mean": -0.3684226190476191,
+              "lift_ci_low": -0.75125,
+              "lift_ci_high": 0.0,
+              "lift_positive_share": 0.0
+            }
+          }
+        },
+        {
+          "variant_a": "random",
+          "variant_b": "gbr",
+          "lifts": {
+            "ndcg@10": {
+              "lift_mean": -0.11727825031611422,
+              "lift_ci_low": -0.4567997881269649,
+              "lift_ci_high": 0.23756084175581577,
+              "lift_positive_share": 0.255
+            },
+            "mrr@10": {
+              "lift_mean": -0.3657793650793651,
+              "lift_ci_low": -0.8,
+              "lift_ci_high": 0.0,
+              "lift_positive_share": 0.019
+            },
+            "ndcg@20": {
+              "lift_mean": -0.04825303623175625,
+              "lift_ci_low": -0.2800912976766684,
+              "lift_ci_high": 0.20387146212951232,
+              "lift_positive_share": 0.344
+            },
+            "mrr@20": {
+              "lift_mean": -0.3657793650793651,
+              "lift_ci_low": -0.8,
+              "lift_ci_high": 0.0,
+              "lift_positive_share": 0.019
+            }
+          }
+        },
+        {
+          "variant_a": "heuristic_v1",
+          "variant_b": "gbr",
+          "lifts": {
+            "ndcg@10": {
+              "lift_mean": -0.07541747352196458,
+              "lift_ci_low": -0.38480405615082813,
+              "lift_ci_high": 0.29019145152595244,
+              "lift_positive_share": 0.314
+            },
+            "mrr@10": {
+              "lift_mean": 0.009866666666666668,
+              "lift_ci_low": 0.0,
+              "lift_ci_high": 0.0,
+              "lift_positive_share": 0.023
+            },
+            "ndcg@20": {
+              "lift_mean": -0.01309278185104452,
+              "lift_ci_low": -0.24998463686919595,
+              "lift_ci_high": 0.23474856053188886,
+              "lift_positive_share": 0.452
+            },
+            "mrr@20": {
+              "lift_mean": 0.009866666666666668,
+              "lift_ci_low": 0.0,
+              "lift_ci_high": 0.0,
+              "lift_positive_share": 0.023
+            }
+          }
+        }
+      ]
+    },
+    "engagement": {
+      "version": "ab_testing.v1",
+      "n_rows": 111,
+      "n_variants": 3,
+      "k_values": [
+        10,
+        20
+      ],
+      "n_resamples": 1000,
+      "variants": [
+        {
+          "name": "random",
+          "description": "Uniform random scores — sanity-check baseline.",
+          "metrics": {
+            "ndcg@10": 0.4071662455281346,
+            "mrr@10": 1.0,
+            "ndcg@20": 0.44352006221450063,
+            "mrr@20": 1.0
+          }
+        },
+        {
+          "name": "heuristic_v1",
+          "description": "Transparent hand-coded per-objective rules over metadata.",
+          "metrics": {
+            "ndcg@10": 0.4246136216292108,
+            "mrr@10": 1.0,
+            "ndcg@20": 0.4045209620202423,
+            "mrr@20": 1.0
+          }
+        },
+        {
+          "name": "gbr",
+          "description": "sklearn GradientBoostingRegressor trained on the train split predicting targets_z[objective].",
+          "metrics": {
+            "ndcg@10": 0.4026798119486316,
+            "mrr@10": 1.0,
+            "ndcg@20": 0.4345181228459441,
+            "mrr@20": 1.0
+          }
+        }
+      ],
+      "all_pairs_lift": [
+        {
+          "variant_a": "random",
+          "variant_b": "heuristic_v1",
+          "lifts": {
+            "ndcg@10": {
+              "lift_mean": 0.025191469487433202,
+              "lift_ci_low": -0.27353929120208403,
+              "lift_ci_high": 0.32499335094913406,
+              "lift_positive_share": 0.564
+            },
+            "mrr@10": {
+              "lift_mean": 0.0009428571428571429,
+              "lift_ci_low": -0.5,
+              "lift_ci_high": 0.5,
+              "lift_positive_share": 0.033
+            },
+            "ndcg@20": {
+              "lift_mean": 0.012535446245011673,
+              "lift_ci_low": -0.2229833746190298,
+              "lift_ci_high": 0.2532720602622948,
+              "lift_positive_share": 0.549
+            },
+            "mrr@20": {
+              "lift_mean": 0.0009428571428571429,
+              "lift_ci_low": -0.5,
+              "lift_ci_high": 0.5,
+              "lift_positive_share": 0.033
+            }
+          }
+        },
+        {
+          "variant_a": "random",
+          "variant_b": "gbr",
+          "lifts": {
+            "ndcg@10": {
+              "lift_mean": 0.032141927998008926,
+              "lift_ci_low": -0.26103499992226886,
+              "lift_ci_high": 0.30839185013951304,
+              "lift_positive_share": 0.604
+            },
+            "mrr@10": {
+              "lift_mean": -0.019808333333333338,
+              "lift_ci_low": -0.5,
+              "lift_ci_high": 0.0,
+              "lift_positive_share": 0.001
+            },
+            "ndcg@20": {
+              "lift_mean": 0.020850710358520378,
+              "lift_ci_low": -0.20591720057302035,
+              "lift_ci_high": 0.24773641932930981,
+              "lift_positive_share": 0.582
+            },
+            "mrr@20": {
+              "lift_mean": -0.019808333333333338,
+              "lift_ci_low": -0.5,
+              "lift_ci_high": 0.0,
+              "lift_positive_share": 0.001
+            }
+          }
+        },
+        {
+          "variant_a": "heuristic_v1",
+          "variant_b": "gbr",
+          "lifts": {
+            "ndcg@10": {
+              "lift_mean": 0.014653571128129293,
+              "lift_ci_low": -0.27469452916111886,
+              "lift_ci_high": 0.2950635287521439,
+              "lift_positive_share": 0.537
+            },
+            "mrr@10": {
+              "lift_mean": -0.026323809523809527,
+              "lift_ci_low": -0.5,
+              "lift_ci_high": 0.0,
+              "lift_positive_share": 0.0
+            },
+            "ndcg@20": {
+              "lift_mean": 0.008794236150612028,
+              "lift_ci_low": -0.21834013477421818,
+              "lift_ci_high": 0.22968759802964198,
+              "lift_positive_share": 0.536
+            },
+            "mrr@20": {
+              "lift_mean": -0.026323809523809527,
+              "lift_ci_low": -0.5,
+              "lift_ci_high": 0.0,
+              "lift_positive_share": 0.0
+            }
+          }
+        }
+      ]
+    },
+    "conversion": {
+      "version": "ab_testing.v1",
+      "n_rows": 111,
+      "n_variants": 3,
+      "k_values": [
+        10,
+        20
+      ],
+      "n_resamples": 1000,
+      "variants": [
+        {
+          "name": "random",
+          "description": "Uniform random scores — sanity-check baseline.",
+          "metrics": {
+            "ndcg@10": 0.41933030426910434,
+            "mrr@10": 1.0,
+            "ndcg@20": 0.42944902311889516,
+            "mrr@20": 1.0
+          }
+        },
+        {
+          "name": "heuristic_v1",
+          "description": "Transparent hand-coded per-objective rules over metadata.",
+          "metrics": {
+            "ndcg@10": 0.1649957313507253,
+            "mrr@10": 0.25,
+            "ndcg@20": 0.22094173894952732,
+            "mrr@20": 0.25
+          }
+        },
+        {
+          "name": "gbr",
+          "description": "sklearn GradientBoostingRegressor trained on the train split predicting targets_z[objective].",
+          "metrics": {
+            "ndcg@10": 0.5232292888647898,
+            "mrr@10": 1.0,
+            "ndcg@20": 0.4436610060564479,
+            "mrr@20": 1.0
+          }
+        }
+      ],
+      "all_pairs_lift": [
+        {
+          "variant_a": "random",
+          "variant_b": "heuristic_v1",
+          "lifts": {
+            "ndcg@10": {
+              "lift_mean": 0.23036706404345375,
+              "lift_ci_low": -0.060761511327282795,
+              "lift_ci_high": 0.49068690867768777,
+              "lift_positive_share": 0.946
+            },
+            "mrr@10": {
+              "lift_mean": 0.5993305555555555,
+              "lift_ci_low": 0.0,
+              "lift_ci_high": 0.875,
+              "lift_positive_share": 0.868
+            },
+            "ndcg@20": {
+              "lift_mean": 0.18119815881001014,
+              "lift_ci_low": -0.02659509385991414,
+              "lift_ci_high": 0.38655997506315437,
+              "lift_positive_share": 0.956
+            },
+            "mrr@20": {
+              "lift_mean": 0.5988911616161615,
+              "lift_ci_low": 0.0,
+              "lift_ci_high": 0.875,
+              "lift_positive_share": 0.868
+            }
+          }
+        },
+        {
+          "variant_a": "random",
+          "variant_b": "gbr",
+          "lifts": {
+            "ndcg@10": {
+              "lift_mean": -0.06805595313159546,
+              "lift_ci_low": -0.38353743497467374,
+              "lift_ci_high": 0.21739843038369427,
+              "lift_positive_share": 0.343
+            },
+            "mrr@10": {
+              "lift_mean": 0.027100000000000003,
+              "lift_ci_low": 0.0,
+              "lift_ci_high": 0.5,
+              "lift_positive_share": 0.058
+            },
+            "ndcg@20": {
+              "lift_mean": -0.024729763818318012,
+              "lift_ci_low": -0.2591515847572273,
+              "lift_ci_high": 0.20085125016024036,
+              "lift_positive_share": 0.429
+            },
+            "mrr@20": {
+              "lift_mean": 0.027100000000000003,
+              "lift_ci_low": 0.0,
+              "lift_ci_high": 0.5,
+              "lift_positive_share": 0.058
+            }
+          }
+        },
+        {
+          "variant_a": "heuristic_v1",
+          "variant_b": "gbr",
+          "lifts": {
+            "ndcg@10": {
+              "lift_mean": -0.2978935517424479,
+              "lift_ci_low": -0.6001364987508135,
+              "lift_ci_high": 0.028640550998052478,
+              "lift_positive_share": 0.03
+            },
+            "mrr@10": {
+              "lift_mean": -0.5697769841269842,
+              "lift_ci_low": -0.8571428571428572,
+              "lift_ci_high": 0.0,
+              "lift_positive_share": 0.008
+            },
+            "ndcg@20": {
+              "lift_mean": -0.21186643294195506,
+              "lift_ci_low": -0.4161255012283145,
+              "lift_ci_high": 0.008968942490935015,
+              "lift_positive_share": 0.034
+            },
+            "mrr@20": {
+              "lift_mean": -0.5694273337773338,
+              "lift_ci_low": -0.8571428571428572,
+              "lift_ci_high": 0.0,
+              "lift_positive_share": 0.008
+            }
+          }
+        }
+      ]
+    }
+  }
+}
