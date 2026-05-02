@@ -3,10 +3,6 @@
 Train the metadata-based engagement predictor on the project's
 temporal splits and report held-out metrics.
 
-Implements suggestion #9 from the prof's email:
-  "Improve the video analysis pipeline by adding engagement prediction
-  from metadata signals (views, likes, comments)."
-
 Trains one regressor per target (default: log_views, engagement_rate),
 saves each to ``artifacts/recommender/engagement_predictor/<target>/model.pkl``,
 evaluates on the held-out test split, and writes a metrics JSON +
@@ -50,7 +46,7 @@ def _load_jsonl(path: Path) -> List[Dict[str, Any]]:
             try:
                 payload = json.loads(line)
             except json.JSONDecodeError as exc:
-                raise SystemExit(f"Bad JSONL row in {path}: {exc}") from exc
+                raise ValueError(f"Bad JSONL row in {path}: {exc}") from exc
             if isinstance(payload, dict):
                 rows.append(payload)
     return rows
@@ -111,8 +107,12 @@ def main(argv: list[str] | None = None) -> int:
     if not args.test_path.exists():
         raise SystemExit(f"Test split not found: {args.test_path}")
 
-    train_rows = _load_jsonl(args.train_path)
-    test_rows = _load_jsonl(args.test_path)
+    try:
+        train_rows = _load_jsonl(args.train_path)
+        test_rows = _load_jsonl(args.test_path)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
     print(f"Loaded {len(train_rows)} train rows from {args.train_path}.")
     print(f"Loaded {len(test_rows)} test rows from {args.test_path}.")
@@ -153,8 +153,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.output_json is not None:
         args.output_json.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "train_path": str(args.train_path),
-            "test_path": str(args.test_path),
+            "train_path": (args.train_path.relative_to(REPO_ROOT) if args.train_path.is_relative_to(REPO_ROOT) else args.train_path).as_posix(),
+            "test_path": (args.test_path.relative_to(REPO_ROOT) if args.test_path.is_relative_to(REPO_ROOT) else args.test_path).as_posix(),
             "n_train_rows": len(train_rows),
             "n_test_rows": len(test_rows),
             "targets": list(args.targets),
