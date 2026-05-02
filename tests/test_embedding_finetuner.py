@@ -350,12 +350,12 @@ class TestTrain:
             EmbeddingFinetunerConfig(
                 output_dir=str(tmp_path / "model"),
                 epochs=1,
-                min_shared_hashtags=99,  # impossible threshold → 0 pairs
+                min_shared_hashtags=99,
             )
         )
         rows = [
             _row("r1", "food", caption="pasta"),
-            _row("r2", "food", caption="cake"),
+            _row("r2", "tech", caption="python"),
         ]
         with pytest.raises(ValueError, match="No training pairs"):
             ft.train(rows)

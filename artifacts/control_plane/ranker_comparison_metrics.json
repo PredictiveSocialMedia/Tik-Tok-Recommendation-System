@@ -1,0 +1,149 @@
+{
+  "train_path": "D:\\ipaz\\Dev\\Intelij\\Programs\\WebStorm\\Projects\\Tiktok scraper\\data\\splits\\train.jsonl",
+  "test_path": "D:\\ipaz\\Dev\\Intelij\\Programs\\WebStorm\\Projects\\Tiktok scraper\\data\\splits\\test.jsonl",
+  "n_train_rows": 511,
+  "n_test_rows": 111,
+  "objectives": [
+    "reach",
+    "engagement",
+    "conversion"
+  ],
+  "k_values": [
+    10,
+    20
+  ],
+  "bootstrap_resamples": 1000,
+  "config": {
+    "n_estimators": 100,
+    "max_depth": 4,
+    "num_leaves": 15,
+    "learning_rate": 0.05,
+    "min_child_samples": 10,
+    "random_state": 42
+  },
+  "per_objective": {
+    "reach": {
+      "n_rows": 111,
+      "learned": {
+        "ndcg@10": 0.49228608613158487,
+        "mrr@10": 1.0,
+        "ndcg@20": 0.4669134776109081,
+        "mrr@20": 1.0
+      },
+      "heuristic": {
+        "ndcg@10": 0.4522180212977459,
+        "mrr@10": 1.0,
+        "ndcg@20": 0.5025710127000954,
+        "mrr@20": 1.0
+      },
+      "lift": {
+        "ndcg@10": {
+          "lift_mean": 0.021755967929223224,
+          "lift_ci_low": -0.28723799289622803,
+          "lift_ci_high": 0.3082653887603529,
+          "lift_positive_share": 0.561
+        },
+        "mrr@10": {
+          "lift_mean": -0.04721666666666667,
+          "lift_ci_low": -0.6666666666666667,
+          "lift_ci_high": 0.0,
+          "lift_positive_share": 0.0
+        },
+        "ndcg@20": {
+          "lift_mean": -0.02284356959539321,
+          "lift_ci_low": -0.251976338553383,
+          "lift_ci_high": 0.19990379960869514,
+          "lift_positive_share": 0.414
+        },
+        "mrr@20": {
+          "lift_mean": -0.04721666666666667,
+          "lift_ci_low": -0.6666666666666667,
+          "lift_ci_high": 0.0,
+          "lift_positive_share": 0.0
+        }
+      }
+    },
+    "engagement": {
+      "n_rows": 111,
+      "learned": {
+        "ndcg@10": 0.36449482101474323,
+        "mrr@10": 1.0,
+        "ndcg@20": 0.4278163232076305,
+        "mrr@20": 1.0
+      },
+      "heuristic": {
+        "ndcg@10": 0.4246136216292108,
+        "mrr@10": 1.0,
+        "ndcg@20": 0.4045209620202423,
+        "mrr@20": 1.0
+      },
+      "lift": {
+        "ndcg@10": {
+          "lift_mean": -0.008041122379867491,
+          "lift_ci_low": -0.2864839402881187,
+          "lift_ci_high": 0.2776156259757108,
+          "lift_positive_share": 0.472
+        },
+        "mrr@10": {
+          "lift_mean": 0.017183333333333335,
+          "lift_ci_low": 0.0,
+          "lift_ci_high": 0.5,
+          "lift_positive_share": 0.033
+        },
+        "ndcg@20": {
+          "lift_mean": -0.00409244671756009,
+          "lift_ci_low": -0.2197860214330596,
+          "lift_ci_high": 0.21177263553941753,
+          "lift_positive_share": 0.476
+        },
+        "mrr@20": {
+          "lift_mean": 0.017183333333333335,
+          "lift_ci_low": 0.0,
+          "lift_ci_high": 0.5,
+          "lift_positive_share": 0.033
+        }
+      }
+    },
+    "conversion": {
+      "n_rows": 111,
+      "learned": {
+        "ndcg@10": 0.36703883590528585,
+        "mrr@10": 1.0,
+        "ndcg@20": 0.34402563123723023,
+        "mrr@20": 1.0
+      },
+      "heuristic": {
+        "ndcg@10": 0.1649957313507253,
+        "mrr@10": 0.25,
+        "ndcg@20": 0.22094173894952732,
+        "mrr@20": 0.25
+      },
+      "lift": {
+        "ndcg@10": {
+          "lift_mean": 0.15787630016369933,
+          "lift_ci_low": -0.1450033449135319,
+          "lift_ci_high": 0.4363038084559001,
+          "lift_positive_share": 0.864
+        },
+        "mrr@10": {
+          "lift_mean": 0.47018055555555555,
+          "lift_ci_low": -0.5,
+          "lift_ci_high": 0.8571428571428572,
+          "lift_positive_share": 0.795
+        },
+        "ndcg@20": {
+          "lift_mean": 0.0996782222391194,
+          "lift_ci_low": -0.10933693134764054,
+          "lift_ci_high": 0.2915050330813811,
+          "lift_positive_share": 0.824
+        },
+        "mrr@20": {
+          "lift_mean": 0.46974116161616164,
+          "lift_ci_low": -0.5,
+          "lift_ci_high": 0.8571428571428572,
+          "lift_positive_share": 0.795
+        }
+      }
+    }
+  }
+}

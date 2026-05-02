@@ -1,0 +1,51 @@
+{
+  "train_path": "data/splits/train.jsonl",
+  "test_path": "data/splits/test.jsonl",
+  "n_train_rows": 511,
+  "n_test_rows": 111,
+  "targets": [
+    "log_views",
+    "engagement_rate"
+  ],
+  "config": {
+    "n_estimators": 50,
+    "max_depth": 2,
+    "learning_rate": 0.05,
+    "min_samples_leaf": 15,
+    "random_state": 42
+  },
+  "per_target": {
+    "log_views": {
+      "trained": {
+        "n_rows": 111.0,
+        "mae": 1.765693,
+        "rmse": 2.272433,
+        "r2": -0.028229,
+        "spearman": 0.091951
+      },
+      "baseline": {
+        "n_rows": 111.0,
+        "mae": 1.864981,
+        "rmse": 2.311652,
+        "r2": -0.064027,
+        "spearman": 0.0
+      }
+    },
+    "engagement_rate": {
+      "trained": {
+        "n_rows": 111.0,
+        "mae": 0.060879,
+        "rmse": 0.09288,
+        "r2": -0.008179,
+        "spearman": 0.125053
+      },
+      "baseline": {
+        "n_rows": 111.0,
+        "mae": 0.05938,
+        "rmse": 0.092868,
+        "r2": -0.007898,
+        "spearman": 0.0
+      }
+    }
+  }
+}
