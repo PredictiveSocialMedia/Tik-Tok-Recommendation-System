@@ -1,6 +1,8 @@
 import numpy as np
+import pytest
 
 from src.recommendation.video import analyzer
+from src.recommendation.video.models import FrameTimelineEntry
 
 
 def _frame(value: int, shape=(24, 16, 3)):
@@ -18,6 +20,7 @@ def test_visual_helpers_detect_motion_and_scene_cuts():
 def test_analyze_colors_handles_empty_and_rgb_frames():
     empty = analyzer._analyze_colors([])
     assert empty == ([], 0.0, 0.0, 0.0)
+    pytest.importorskip("cv2")
 
     red = np.zeros((20, 20, 3), dtype=np.uint8)
     red[:, :, 0] = 255
@@ -30,6 +33,7 @@ def test_analyze_colors_handles_empty_and_rgb_frames():
 
 
 def test_timeline_generation_returns_stable_entries():
+    pytest.importorskip("cv2")
     frames = [_frame(0), _frame(80), _frame(180)]
 
     timeline = analyzer._generate_timeline(frames, fps=1.0, duration=3.0)
@@ -67,6 +71,18 @@ def test_video_analyzer_integration_with_mocked_extractors(monkeypatch, tmp_path
     monkeypatch.setattr(analyzer, "_extract_ocr_text", lambda frames: "DINNER")
     monkeypatch.setattr(analyzer, "_compute_blur_score", lambda frames: 42.0)
     monkeypatch.setattr(analyzer, "_extract_keywords", lambda text, language="": ["ramen", "noodles"])
+    monkeypatch.setattr(
+        analyzer,
+        "_generate_timeline",
+        lambda frames, fps, duration: [
+            FrameTimelineEntry(
+                timestamp_sec=0.0,
+                thumbnail_b64="mock",
+                motion_score=0.1,
+                relevance_score=0.5,
+            )
+        ],
+    )
 
     response = analyzer.VideoAnalyzer(max_workers=3).analyze(str(video_path))
 
