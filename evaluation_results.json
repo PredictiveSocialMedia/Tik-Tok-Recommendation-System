@@ -1,25 +1,20 @@
 {
+  "generated_at_utc": "2026-05-06T20:25:47+00:00",
+  "git_sha": "00e7f72bd0bfea0382b0c1a85e02d0a6a212a3c0",
+  "passes": [
+    "retrieval_only",
+    "production_pipeline"
+  ],
   "retrieval_only": {
-    "ndcg@5": 0.3029,
-    "mrr@5": 0.5464,
+    "ndcg@5": 0.299,
+    "mrr@5": 0.5371,
     "recall@5": 0.305,
-    "ndcg@10": 0.3683,
-    "mrr@10": 0.5646,
+    "ndcg@10": 0.3642,
+    "mrr@10": 0.5553,
     "recall@10": 0.4628,
-    "ndcg@20": 0.4309,
-    "mrr@20": 0.567,
+    "ndcg@20": 0.4267,
+    "mrr@20": 0.5577,
     "recall@20": 0.647
-  },
-  "full_pipeline": {
-    "ndcg@5": 0.4292,
-    "mrr@5": 0.526,
-    "recall@5": 0.165,
-    "ndcg@10": 0.4784,
-    "mrr@10": 0.5465,
-    "recall@10": 0.3311,
-    "ndcg@20": 0.555,
-    "mrr@20": 0.5567,
-    "recall@20": 0.6294
   },
   "test_set_size": 111,
   "queries_evaluated": 89,
@@ -30,11 +25,33 @@
       10,
       20
     ],
-    "retriever": "tfidf_cosine",
-    "ranker_blend": {
-      "cosine_weight": 0.6,
-      "engagement_weight": 0.4
+    "baseline_retriever": "tfidf_cosine",
+    "production_objective": "engagement",
+    "retrieve_k": 200,
+    "bundle_dir": "/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/artifacts/recommender/20260414T050542Z-phase2-bootstrap-feedback",
+    "split_hashes": {
+      "train": "966018d8d8d6d36e4b7accdedcbde4e8b425ada6b6a8c956aed80512a927822e",
+      "validation": "4edc4515351b760346d51c8e372b41a196f06bd66dba2286d59d3b8e2900094e",
+      "test": "3e4f2eb154ef045d551a1e9bd788e72fdd2cce953a3ed010c0394662fd70f836"
     },
     "relevance_proxy": "candidate shares >=1 hashtag or top-3 keyword with query AND engagement >= median of hashtag bucket"
+  },
+  "production_pipeline": {
+    "ndcg@5": 0.2311,
+    "mrr@5": 0.5358,
+    "recall@5": 0.1883,
+    "ndcg@10": 0.2571,
+    "mrr@10": 0.5407,
+    "recall@10": 0.2638,
+    "ndcg@20": 0.3027,
+    "mrr@20": 0.5445,
+    "recall@20": 0.4045
+  },
+  "production_diagnostics": {
+    "failed_queries": 0,
+    "failure_examples": [],
+    "bundle_id": "20260414T050542Z-phase2-bootstrap-feedback",
+    "retriever_loaded": false,
+    "retriever_load_warning": "retriever_load_failed: [Errno 2] No such file or directory: '/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/artifacts/recommender/20260414T050542Z-phase2-bootstrap-feedback/retriever/sparse.pkl'"
   }
 }

@@ -60,3 +60,24 @@ PYTHONPATH=. python3 scripts/run_live_e2e_validation.py \
 ```
 
 Treat any report with elevated fallback, repeated compatibility mismatches, or `overall_passed: false` as an SLO breach until explained.
+
+## Cloud Monitoring Alerts
+
+Alert policy templates live in `deploy/cloud_run_alerts.yaml` and cover:
+
+- Recommender API p95 latency.
+- Recommender API 5xx error rate.
+- Video analyzer p95 latency.
+- Recommendation quality drift via `custom.googleapis.com/recommender/quality_drift_score`.
+
+Before applying, replace `PROJECT_ID`, service names, and `NOTIFICATION_CHANNEL_ID`.
+Apply each YAML document as an individual Cloud Monitoring policy with:
+
+```bash
+csplit -f /tmp/recommender-alert- deploy/cloud_run_alerts.yaml '/^---$/' '{*}'
+gcloud alpha monitoring policies create --policy-from-file=/tmp/recommender-alert-01
+```
+
+Quality drift alerts assume the scheduled drift monitor exports its summary as
+a custom metric after `scripts/run_drift_monitor.py` writes
+`artifacts/control_plane/drift_report.json`.

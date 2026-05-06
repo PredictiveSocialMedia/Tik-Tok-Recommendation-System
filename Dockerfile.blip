@@ -1,0 +1,37 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg gcc g++ curl && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY requirements-base.txt requirements-service.txt requirements-vlm.txt ./
+RUN pip install --no-cache-dir \
+    -r requirements-service.txt \
+    -r requirements-vlm.txt \
+    "opencv-python-headless>=4.9" \
+    "decord>=0.6"
+
+COPY src/ ./src/
+RUN touch ./src/__init__.py
+
+RUN python -c "\
+from transformers import BlipProcessor, BlipForConditionalGeneration; \
+model='Salesforce/blip-image-captioning-base'; \
+BlipProcessor.from_pretrained(model); \
+BlipForConditionalGeneration.from_pretrained(model); \
+print('BLIP model cached')"
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+ENV PORT=8080
+ENV BLIP_MODEL_ID=Salesforce/blip-image-captioning-base
+ENV PRELOAD_BLIP=true
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=3 \
+  CMD python -c "import urllib.request,json; d=json.loads(urllib.request.urlopen('http://127.0.0.1:8080/v1/health').read()); exit(0 if d.get('ok') else 1)"
+
+CMD ["sh", "-c", "uvicorn src.recommendation.video.blip_service:app --host 0.0.0.0 --port ${PORT:-8080}"]

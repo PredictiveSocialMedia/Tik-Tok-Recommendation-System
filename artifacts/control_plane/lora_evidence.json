@@ -1,0 +1,33 @@
+{
+  "title": "LoRA hashtag fine-tuning evidence",
+  "status": "candidate_missing",
+  "data": {
+    "train_rows": 511,
+    "validation_rows": 109,
+    "test_rows": 111
+  },
+  "split": {
+    "train": "/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/data/splits/train.jsonl",
+    "validation": "/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/data/splits/validation.jsonl",
+    "test": "/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/data/splits/test.jsonl"
+  },
+  "models": [
+    {
+      "name": "topic_prior_hashtag_baseline",
+      "role": "baseline",
+      "metrics": {
+        "precision@10": 0.07889908256880733,
+        "recall@10": 0.17541869294796625,
+        "f1@10": 0.10565199617295405
+      }
+    }
+  ],
+  "comparison": {
+    "primary_metric": "f1@10",
+    "verdict": "candidate_missing",
+    "deltas": {}
+  },
+  "notes": [
+    "LoRA adapter directory not found: /Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/models/tiktok-hashtag-lora. Run scripts/fine_tune_lora_hashtag.py first, then rerun this evidence report."
+  ]
+}

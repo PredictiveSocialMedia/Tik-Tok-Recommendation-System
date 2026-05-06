@@ -1,0 +1,26 @@
+{
+  "rows_evaluated": 109,
+  "top_n": 10,
+  "test_path": "/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/data/splits/test.jsonl",
+  "recommender_dir": "/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/artifacts/hashtag_recommender",
+  "variants": {
+    "before_no_mmr": {
+      "unique_tags": 511.0,
+      "ground_truth_coverage": 0.48166259168704156,
+      "avg_pairwise_similarity": 0.03588593809507996,
+      "redundant_tag_rate": 0.024757529351710057
+    },
+    "after_mmr": {
+      "unique_tags": 511.0,
+      "ground_truth_coverage": 0.48166259168704156,
+      "avg_pairwise_similarity": 0.03588593809507996,
+      "redundant_tag_rate": 0.024757529351710057
+    }
+  },
+  "delta": {
+    "unique_tags": 0.0,
+    "ground_truth_coverage": 0.0,
+    "avg_pairwise_similarity": 0.0,
+    "redundant_tag_rate": 0.0
+  }
+}

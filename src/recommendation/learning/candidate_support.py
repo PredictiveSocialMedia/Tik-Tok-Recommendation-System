@@ -215,6 +215,87 @@ def _extract_engagement_metrics(payload: Dict[str, Any]) -> Dict[str, float]:
     }
 
 
+def _freshness_prior(posted_at: Optional[datetime], as_of: datetime) -> float:
+    if posted_at is None:
+        return 0.50
+    age_days = max(0.0, (as_of - posted_at).total_seconds() / 86400.0)
+    if age_days <= 2:
+        return 0.85
+    if age_days <= 14:
+        return 0.65
+    if age_days <= 45:
+        return 0.45
+    return 0.30
+
+
+def _build_cold_start_trace(
+    *,
+    payload: Dict[str, Any],
+    as_of: datetime,
+    topic_key: str,
+    text: str,
+    hashtags: List[str],
+    keywords: List[str],
+    engagement_metrics: Dict[str, float],
+    trajectory: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Describe fallback ranking for content with no engagement history."""
+    has_engagement = any(
+        float(engagement_metrics.get(key) or 0.0) > 0.0
+        for key in ("views", "likes", "comments", "shares")
+    )
+    trajectory_available = (
+        bool(trajectory)
+        and float(trajectory.get("available_ratio") or 0.0) > 0.0
+    )
+    is_cold_start = not has_engagement and not trajectory_available
+    posted = parse_dt(payload.get("posted_at")) or parse_dt(payload.get("as_of_time"))
+    semantic_signal = clamp(
+        (0.35 if text else 0.0)
+        + min(len(hashtags), 5) * 0.05
+        + min(len(keywords), 5) * 0.04,
+        0.0,
+        1.0,
+    )
+    topic_prior = 0.65 if topic_key and topic_key != "general" else 0.35
+    freshness = _freshness_prior(posted, as_of)
+    exploration = 0.18 if is_cold_start else 0.0
+    fallback_rank_signal = clamp(
+        semantic_signal * 0.45
+        + topic_prior * 0.25
+        + freshness * 0.20
+        + exploration,
+        0.0,
+        1.0,
+    )
+    uncertainty = clamp(1.0 - fallback_rank_signal, 0.15, 0.95)
+    return {
+        "is_cold_start": bool(is_cold_start),
+        "strategy": (
+            "semantic_topic_freshness_exploration"
+            if is_cold_start
+            else "observed_engagement_or_trajectory"
+        ),
+        "semantic_signal": round_score(semantic_signal, 6),
+        "topic_prior": round_score(topic_prior, 6),
+        "freshness_prior": round_score(freshness, 6),
+        "exploration_bonus": round_score(exploration, 6),
+        "fallback_rank_signal": round_score(fallback_rank_signal, 6),
+        "uncertainty": round_score(uncertainty, 6),
+        "flags": (
+            [
+                "no_engagement_history",
+                "semantic_similarity_fallback",
+                "topic_hashtag_prior",
+                "freshness_exploration",
+                "high_uncertainty",
+            ]
+            if is_cold_start
+            else []
+        ),
+    }
+
+
 def prepare_candidate(
     *,
     payload: Dict[str, Any],
@@ -316,11 +397,26 @@ def prepare_candidate(
         else:
             support_level = "low"
 
+    engagement_metrics = _extract_engagement_metrics(payload)
+    topic_key = infer_topic_key(payload)
+    cold_start_trace = _build_cold_start_trace(
+        payload=payload,
+        as_of=as_of,
+        topic_key=topic_key,
+        text=text,
+        hashtags=hashtags,
+        keywords=keywords,
+        engagement_metrics=engagement_metrics,
+        trajectory=trajectory,
+    )
+    if cold_start_trace["is_cold_start"]:
+        support_flags.append("cold_start_no_engagement_history")
+
     return {
         "candidate_id": candidate_id,
         "candidate_row_id": candidate_id,
         "author_id": author_id or "unknown",
-        "topic_key": infer_topic_key(payload),
+        "topic_key": topic_key,
         "text": text,
         "raw_text": raw_text,
         "semantic_text": text,
@@ -343,7 +439,8 @@ def prepare_candidate(
         "support_level": support_level,
         "support_score": support_score,
         "support_flags": support_flags,
-        "engagement_metrics": _extract_engagement_metrics(payload),
+        "engagement_metrics": engagement_metrics,
+        "cold_start_trace": cold_start_trace,
         "raw_payload": payload,
         "retrieval_branch_scores": {
             "semantic": 0.0,

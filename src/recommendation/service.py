@@ -509,6 +509,7 @@ class HashtagSuggestRequest(BaseModel):
     caption: str
     k: int = Field(default=10, ge=1, le=50)
     top_n: int = Field(default=10, ge=1, le=50)
+    diversity_weight: float = Field(default=0.5, ge=0.0, le=1.0)
     exclude_tags: List[str] = Field(default_factory=list)
     include_neighbours: bool = False
 
@@ -549,6 +550,7 @@ def suggest_hashtags(request: HashtagSuggestRequest) -> Dict[str, Any]:
             k=request.k,
             top_n=request.top_n,
             exclude_tags=request.exclude_tags,
+            diversity_weight=request.diversity_weight,
         )
         result = {"hashtags": hashtags}
 

@@ -25,6 +25,7 @@ from src.recommendation.learning.ranker_comparison import (  # noqa: E402
     extract_target_z,
     format_comparison_markdown,
     heuristic_score,
+    interpret_lightgbm_comparison,
     paired_bootstrap_lift,
 )
 
@@ -463,11 +464,31 @@ def test_format_markdown_includes_headers_and_lift_block() -> None:
     assert "Lift" in text
     assert "95% CI" in text
     assert "ndcg@10" in text
+    assert "Interpretation" in text
 
 
 def test_format_markdown_empty_returns_placeholder() -> None:
     text = format_comparison_markdown({})
     assert "No metrics" in text
+
+
+def test_interpret_lightgbm_comparison_separates_wins_losses_and_mixed() -> None:
+    metrics = {
+        "reach": {
+            "lift": {
+                "ndcg@10": {"lift_mean": 0.2, "lift_positive_share": 0.9},
+                "mrr@10": {"lift_mean": -0.1, "lift_positive_share": 0.2},
+                "ndcg@20": {"lift_mean": 0.01, "lift_positive_share": 0.5},
+            }
+        }
+    }
+
+    lines = interpret_lightgbm_comparison(metrics)
+
+    assert "reach ndcg@10" in lines[0]
+    assert "reach mrr@10" in lines[1]
+    assert "reach ndcg@20" in lines[2]
+    assert "not a blanket replacement" in lines[3]
 
 
 # ---------------------------------------------------------------------------
