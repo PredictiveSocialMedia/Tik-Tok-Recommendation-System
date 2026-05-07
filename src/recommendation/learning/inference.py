@@ -581,6 +581,15 @@ def _performance_quality_score(candidate: Dict[str, Any]) -> float:
     metrics = candidate.get("engagement_metrics") or {}
     views = _as_float(metrics.get("views"), 0.0)
     engagement_rate = _as_float(metrics.get("engagement_rate"), 0.0)
+    cold_start = candidate.get("cold_start_trace")
+    if views <= 0 and isinstance(cold_start, dict) and cold_start.get("is_cold_start"):
+        # New content has no outcome evidence yet. Use a conservative fallback
+        # so semantic/topic/freshness signals can participate without pretending
+        # we observed engagement quality.
+        return _round(
+            _clamp(_as_float(cold_start.get("fallback_rank_signal"), 0.0) * 0.55, 0.0, 0.55),
+            6,
+        )
     view_signal = math.log1p(views) / math.log1p(10_000_000) if views > 0 else 0.0
     er_signal = min(engagement_rate / 0.10, 1.0)
     return _round(_clamp(view_signal * 0.55 + er_signal * 0.45, 0.0, 1.0), 6)
@@ -1899,6 +1908,7 @@ class RecommenderRuntime:
                 "trajectory_regime_pred": str((item.get("trajectory_trace") or {}).get("regime_pred") or "balanced"),
                 "trajectory_regime_probabilities": dict((item.get("trajectory_trace") or {}).get("regime_probabilities") or {}),
                 "trajectory_regime_confidence": _sanitize_probability((item.get("trajectory_trace") or {}).get("regime_confidence"), 0.0),
+                "cold_start_trace": item.get("cold_start_trace") or {},
                 "support_level": item["support_level"],
                 "support_score": _round(item["support_score"], 6),
                 "score_components": item["score_components"],

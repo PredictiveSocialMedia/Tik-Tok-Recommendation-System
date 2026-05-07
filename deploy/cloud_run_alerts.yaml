@@ -1,0 +1,114 @@
+# Cloud Monitoring alert policy templates for the recommender Cloud Run stack.
+#
+# Apply each YAML document as a separate policy after replacing:
+#   PROJECT_ID, RECOMMENDER_SERVICE, VIDEO_ANALYZER_SERVICE, NOTIFICATION_CHANNEL_ID
+#
+# Example:
+#   csplit -f /tmp/recommender-alert- deploy/cloud_run_alerts.yaml '/^---$/' '{*}'
+#   gcloud alpha monitoring policies create --policy-from-file=/tmp/recommender-alert-01
+
+displayName: "Recommender API p95 latency SLO breach"
+combiner: OR
+enabled: true
+notificationChannels:
+  - "projects/PROJECT_ID/notificationChannels/NOTIFICATION_CHANNEL_ID"
+conditions:
+  - displayName: "Cloud Run request latency p95 above 250ms"
+    conditionThreshold:
+      filter: >-
+        resource.type = "cloud_run_revision"
+        AND resource.labels.service_name = "RECOMMENDER_SERVICE"
+        AND metric.type = "run.googleapis.com/request_latencies"
+      aggregations:
+        - alignmentPeriod: 300s
+          perSeriesAligner: ALIGN_DELTA
+          crossSeriesReducer: REDUCE_PERCENTILE_95
+          groupByFields:
+            - resource.labels.service_name
+      comparison: COMPARISON_GT
+      thresholdValue: 250
+      duration: 600s
+      trigger:
+        count: 1
+documentation:
+  mimeType: text/markdown
+  content: "Python recommender p95 latency exceeded the 250ms SLO for 10 minutes. Check /v1/metrics, recent rollout, bundle id, and Cloud Run CPU/memory saturation."
+---
+displayName: "Recommender API 5xx error-rate SLO breach"
+combiner: OR
+enabled: true
+notificationChannels:
+  - "projects/PROJECT_ID/notificationChannels/NOTIFICATION_CHANNEL_ID"
+conditions:
+  - displayName: "5xx responses above 2 percent"
+    conditionThreshold:
+      filter: >-
+        resource.type = "cloud_run_revision"
+        AND resource.labels.service_name = "RECOMMENDER_SERVICE"
+        AND metric.type = "run.googleapis.com/request_count"
+        AND metric.labels.response_code_class = "5xx"
+      aggregations:
+        - alignmentPeriod: 300s
+          perSeriesAligner: ALIGN_RATE
+          crossSeriesReducer: REDUCE_SUM
+          groupByFields:
+            - resource.labels.service_name
+      comparison: COMPARISON_GT
+      thresholdValue: 0.02
+      duration: 600s
+      trigger:
+        count: 1
+documentation:
+  mimeType: text/markdown
+  content: "Recommender 5xx rate is elevated. Check compatibility failures, stage timeouts, artifact load errors, and recent deploys."
+---
+displayName: "Video analyzer p95 latency SLO breach"
+combiner: OR
+enabled: true
+notificationChannels:
+  - "projects/PROJECT_ID/notificationChannels/NOTIFICATION_CHANNEL_ID"
+conditions:
+  - displayName: "Video analyzer p95 above 30s"
+    conditionThreshold:
+      filter: >-
+        resource.type = "cloud_run_revision"
+        AND resource.labels.service_name = "VIDEO_ANALYZER_SERVICE"
+        AND metric.type = "run.googleapis.com/request_latencies"
+      aggregations:
+        - alignmentPeriod: 300s
+          perSeriesAligner: ALIGN_DELTA
+          crossSeriesReducer: REDUCE_PERCENTILE_95
+          groupByFields:
+            - resource.labels.service_name
+      comparison: COMPARISON_GT
+      thresholdValue: 30000
+      duration: 600s
+      trigger:
+        count: 1
+documentation:
+  mimeType: text/markdown
+  content: "Video analyzer p95 latency exceeded 30s. Check Whisper/BLIP worker saturation, model cold starts, and benchmark_video_pipeline.py artifacts."
+---
+displayName: "Recommendation quality drift breach"
+combiner: OR
+enabled: true
+notificationChannels:
+  - "projects/PROJECT_ID/notificationChannels/NOTIFICATION_CHANNEL_ID"
+conditions:
+  - displayName: "Quality drift score above threshold"
+    conditionThreshold:
+      filter: >-
+        resource.type = "global"
+        AND metric.type = "custom.googleapis.com/recommender/quality_drift_score"
+      aggregations:
+        - alignmentPeriod: 3600s
+          perSeriesAligner: ALIGN_MEAN
+          crossSeriesReducer: REDUCE_MEAN
+      comparison: COMPARISON_GT
+      thresholdValue: 0.15
+      duration: 7200s
+      trigger:
+        count: 1
+documentation:
+  mimeType: text/markdown
+  content: "Recommendation quality drift exceeded threshold for 2 hours. Run scripts/run_drift_monitor.py and compare the latest offline evaluation artifact against the locked split hash."

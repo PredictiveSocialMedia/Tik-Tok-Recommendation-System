@@ -1,4 +1,4 @@
-.PHONY: lint test ci validate-data generate-mock baseline datamart feature-snapshot fabric-hourly fabric-daily comment-snapshot comment-priors comment-hourly comment-daily eval-fabric-rollout eval-comment-rollout train-recommender eval-recommender eval-recommender-ablation serve-recommender refresh-serving-bundle bootstrap-embedding benchmark-recommender build-retriever fit-retriever-fusion eval-retriever-only eval outcome-attribution drift-monitor retrain-controller experiment-analysis live-e2e-validate train-engagement-predictor compare-rankers ab-test eval-trajectory-held-out
+.PHONY: lint test ci validate-data generate-mock baseline datamart feature-snapshot fabric-hourly fabric-daily comment-snapshot comment-priors comment-hourly comment-daily eval-fabric-rollout eval-comment-rollout train-recommender eval-recommender eval-recommender-ablation serve-recommender refresh-serving-bundle bootstrap-embedding benchmark-recommender build-retriever fit-retriever-fusion eval-retriever-only eval-offline semantic-finetune-evidence lora-evidence eval outcome-attribution drift-monitor retrain-controller experiment-analysis live-e2e-validate train-engagement-predictor compare-rankers ab-test hashtag-ab-test hashtag-diversity eval-trajectory-held-out
 
 # Lint only tests for Sprint 1 (repo has known scaffold lint debt elsewhere).
 lint:
@@ -80,6 +80,15 @@ fit-retriever-fusion:
 eval-retriever-only:
 	PYTHONPATH=. python3 scripts/eval_retriever.py data/mock/training_datamart.json --retriever-dir artifacts/retriever/latest
 
+eval-offline:
+	PYTHONPATH=. python3 scripts/evaluate_pipeline.py --bundle-dir artifacts/recommender/latest --out evaluation_results.json --out-md evaluation_results.md
+
+semantic-finetune-evidence:
+	PYTHONPATH=. python3 scripts/report_semantic_finetune_evidence.py --output-json artifacts/control_plane/semantic_finetune_evidence.json --output-md artifacts/control_plane/semantic_finetune_evidence.md
+
+lora-evidence:
+	PYTHONPATH=. python3 scripts/report_lora_evidence.py --output-json artifacts/control_plane/lora_evidence.json --output-md artifacts/control_plane/lora_evidence.md
+
 eval:
 	@echo "Usage: make eval MODE=recommender|retriever|benchmark ARGS='...'"
 	@echo "Example: make eval MODE=recommender ARGS='artifacts/recommender/latest --show-manifest'"
@@ -102,6 +111,10 @@ live-e2e-validate:
 
 ab-test:
 	PYTHONPATH=. python3 scripts/run_ab_test.py --output-json artifacts/control_plane/ab_test_report.json
+hashtag-ab-test:
+	PYTHONPATH=. python3 scripts/run_hashtag_ab_test.py --output-json artifacts/control_plane/hashtag_ab_test_report.json --output-md artifacts/control_plane/hashtag_ab_test_report.md
+hashtag-diversity:
+	PYTHONPATH=. python3 scripts/run_hashtag_diversity_report.py --output-json artifacts/control_plane/hashtag_diversity_report.json --output-md artifacts/control_plane/hashtag_diversity_report.md
 compare-rankers:
 	PYTHONPATH=. python3 scripts/compare_lightgbm_vs_heuristic.py --output-json artifacts/control_plane/ranker_comparison_metrics.json
 train-engagement-predictor:

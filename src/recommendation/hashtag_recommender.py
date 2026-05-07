@@ -76,6 +76,49 @@ def extract_combined_hashtags(caption: str, hashtag_list: Sequence[str]) -> List
     return combined
 
 
+def hashtag_jaccard(a: str, b: str, n: int = 3) -> float:
+    """Character n-gram Jaccard similarity between two hashtag strings."""
+    sa = {a[i:i+n] for i in range(len(a)-n+1)}
+    sb = {b[i:i+n] for i in range(len(b)-n+1)}
+    if not sa or not sb:
+        return 0.0
+    return len(sa & sb) / len(sa | sb)
+
+
+def rerank_hashtags_mmr(
+    recs: Sequence[Dict[str, Any]],
+    *,
+    top_n: int,
+    diversity_weight: float = 0.5,
+) -> List[Dict[str, Any]]:
+    """Apply lightweight MMR-style diversity reranking to hashtag results."""
+    if top_n <= 0:
+        return []
+    if diversity_weight <= 0:
+        return [dict(item) for item in recs[:top_n]]
+
+    selected: List[Dict[str, Any]] = []
+    for raw_candidate in recs:
+        candidate = dict(raw_candidate)
+        if not selected:
+            selected.append(candidate)
+            continue
+        max_sim = max(
+            hashtag_jaccard(candidate["hashtag"], item["hashtag"])
+            for item in selected
+        )
+        candidate["score"] = round(
+            float(candidate.get("score", 0.0)) - diversity_weight * max_sim,
+            4,
+        )
+        selected.append(candidate)
+        if len(selected) >= top_n:
+            break
+
+    selected.sort(key=lambda x: (-x["score"], -x["frequency"]))
+    return selected[:top_n]
+
+
 # ---------------------------------------------------------------------------
 # Hashtag Recommender
 # ---------------------------------------------------------------------------
@@ -103,10 +146,12 @@ class HashtagRecommender:
         corpus_captions: List[str],
         corpus_video_ids: List[str],
         model_name: str = "all-MiniLM-L6-v2",
+        local_files_only: bool = False,
     ) -> None:
         import faiss
 
         self.model_name = model_name
+        self.local_files_only = local_files_only
         self.embeddings = embeddings.astype(np.float32)
         self.corpus_hashtags = corpus_hashtags
         self.corpus_engagement = corpus_engagement
@@ -120,7 +165,10 @@ class HashtagRecommender:
     def model(self):
         if self._model is None:
             from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(self.model_name)
+            self._model = SentenceTransformer(
+                self.model_name,
+                local_files_only=self.local_files_only,
+            )
         return self._model
 
     # ----- training --------------------------------------------------------
@@ -195,6 +243,7 @@ class HashtagRecommender:
         k: int = 10,
         top_n: int = 10,
         exclude_tags: Optional[Sequence[str]] = None,
+        diversity_weight: float = 0.5,
     ) -> List[Dict[str, Any]]:
         """Recommend hashtags for a new caption.
 
@@ -249,36 +298,11 @@ class HashtagRecommender:
 
         recs.sort(key=lambda x: (-x["score"], -x["frequency"]))
 
-        # ── Diversity-aware reranking ────────────────────────────────────────
-        # Applies a lightweight diversity penalty inspired by MMR principles.
-        # Each candidate's score is penalized by its character-level similarity
-        # to already-selected tags, preventing near-duplicate results like
-        # #football, #footballskills, #footballgoals from all ranking at the top.
-        def _jaccard(a: str, b: str, n: int = 3) -> float:
-            """Character n-gram Jaccard similarity between two tag strings."""
-            sa = {a[i:i+n] for i in range(len(a)-n+1)}
-            sb = {b[i:i+n] for i in range(len(b)-n+1)}
-            if not sa or not sb:
-                return 0.0
-            return len(sa & sb) / len(sa | sb)
-
-        diversity_weight = 0.5
-        selected: List[Dict[str, Any]] = []
-
-        for candidate in recs:
-            if not selected:
-                selected.append(candidate)
-                continue
-            max_sim = max(_jaccard(candidate["hashtag"], s["hashtag"]) for s in selected)
-            candidate["score"] = round(
-                candidate["score"] - diversity_weight * max_sim, 4
-            )
-            selected.append(candidate)
-            if len(selected) >= top_n:
-                break
-
-        selected.sort(key=lambda x: (-x["score"], -x["frequency"]))
-        return selected[:top_n]
+        return rerank_hashtags_mmr(
+            recs,
+            top_n=top_n,
+            diversity_weight=diversity_weight,
+        )
 
     def recommend_with_neighbours(
         self,
@@ -360,7 +384,7 @@ class HashtagRecommender:
         print(f"HashtagRecommender saved to {path}")
 
     @classmethod
-    def load(cls, path: Path) -> "HashtagRecommender":
+    def load(cls, path: Path, *, local_files_only: bool = False) -> "HashtagRecommender":
         """Load a trained recommender from disk."""
         import faiss
 
@@ -374,6 +398,7 @@ class HashtagRecommender:
             corpus_captions=meta["corpus_captions"],
             corpus_video_ids=meta["corpus_video_ids"],
             model_name=meta["model_name"],
+            local_files_only=local_files_only,
         )
         instance.index = faiss.read_index(str(path / "faiss.index"))
         print(f"HashtagRecommender loaded: {meta['corpus_size']} entries, {meta['embedding_dim']}d")

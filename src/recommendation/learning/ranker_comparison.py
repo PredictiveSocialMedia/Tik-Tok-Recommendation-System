@@ -583,7 +583,47 @@ def format_comparison_markdown(
                     p=lift_payload.get("lift_positive_share", 0.0),
                 )
             )
+    interpretation = interpret_lightgbm_comparison(metrics)
+    rows.append("")
+    rows.append("**Interpretation:**")
+    rows.append("")
+    for item in interpretation:
+        rows.append(f"- {item}")
     return "\n".join(rows)
+
+
+def interpret_lightgbm_comparison(metrics: Dict[str, Dict[str, Any]]) -> List[str]:
+    """Summarize where LightGBM beats, trails, or ties the heuristic baseline."""
+    if not metrics:
+        return ["No usable rows were available for interpretation."]
+    wins: List[str] = []
+    losses: List[str] = []
+    ties: List[str] = []
+    for objective, payload in metrics.items():
+        for metric_name, lift_payload in (payload.get("lift") or {}).items():
+            mean = float(lift_payload.get("lift_mean") or 0.0)
+            positive_share = float(lift_payload.get("lift_positive_share") or 0.0)
+            label = f"{objective} {metric_name} ({mean:+.4f}, P>0={positive_share:.2f})"
+            if mean > 0 and positive_share >= 0.60:
+                wins.append(label)
+            elif mean < 0 and positive_share <= 0.40:
+                losses.append(label)
+            else:
+                ties.append(label)
+    output: List[str] = []
+    output.append(
+        "LightGBM wins on: " + (", ".join(wins) if wins else "none of the measured objective/metric pairs")
+    )
+    output.append(
+        "Heuristic wins on: " + (", ".join(losses) if losses else "none of the measured objective/metric pairs")
+    )
+    output.append(
+        "Mixed or statistically weak differences: " + (", ".join(ties) if ties else "none")
+    )
+    output.append(
+        "Treat the model as objective-specific evidence, not a blanket replacement for the heuristic ranker."
+    )
+    return output
 
 
 __all__ = [
@@ -602,6 +642,7 @@ __all__ = [
     "extract_features",
     "extract_target_z",
     "format_comparison_markdown",
+    "interpret_lightgbm_comparison",
     "heuristic_score",
     "paired_bootstrap_lift",
 ]

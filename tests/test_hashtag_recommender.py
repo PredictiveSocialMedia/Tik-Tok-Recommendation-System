@@ -19,6 +19,8 @@ from src.recommendation.hashtag_recommender import (
     clean_caption,
     extract_combined_hashtags,
     extract_hashtags_from_text,
+    hashtag_jaccard,
+    rerank_hashtags_mmr,
 )
 
 
@@ -175,39 +177,26 @@ class TestExtractCombinedHashtags:
 # ---------------------------------------------------------------------------
 
 class TestInlineDiversityLogic:
-    """White-box tests for the n-gram Jaccard similarity used inside recommend().
-
-    The _jaccard function is defined inline inside recommend() so we replicate
-    it here to verify the mathematical properties the diversity reranking
-    depends on.
-    """
-
-    @staticmethod
-    def _jaccard(a: str, b: str, n: int = 3) -> float:
-        sa = {a[i:i+n] for i in range(len(a)-n+1)}
-        sb = {b[i:i+n] for i in range(len(b)-n+1)}
-        if not sa or not sb:
-            return 0.0
-        return len(sa & sb) / len(sa | sb)
+    """Tests for the n-gram Jaccard and MMR-style diversity helpers."""
 
     def test_identical_strings_return_one(self):
-        assert self._jaccard("#football", "#football") == 1.0
+        assert hashtag_jaccard("#football", "#football") == 1.0
 
     def test_completely_different_strings_return_low(self):
-        score = self._jaccard("#football", "#xyz")
+        score = hashtag_jaccard("#football", "#xyz")
         assert score < 0.3
 
     def test_overlapping_strings_return_intermediate(self):
-        score = self._jaccard("#football", "#footballskills")
+        score = hashtag_jaccard("#football", "#footballskills")
         assert 0.2 < score < 1.0
 
     def test_symmetry(self):
-        a = self._jaccard("#football", "#goals")
-        b = self._jaccard("#goals", "#football")
+        a = hashtag_jaccard("#football", "#goals")
+        b = hashtag_jaccard("#goals", "#football")
         assert abs(a - b) < 1e-9
 
     def test_short_string_returns_zero(self):
-        assert self._jaccard("ab", "#footballskills") == 0.0
+        assert hashtag_jaccard("ab", "#footballskills") == 0.0
 
     def test_score_bounded_zero_to_one(self):
         pairs = [
@@ -215,29 +204,25 @@ class TestInlineDiversityLogic:
             ("#dance", "#cooking"),
         ]
         for a, b in pairs:
-            score = self._jaccard(a, b)
+            score = hashtag_jaccard(a, b)
             assert 0.0 <= score <= 1.0
 
     def test_diversity_penalty_reduces_similar_tag_score(self):
         """Similar tags should get a larger diversity penalty."""
-        diversity_weight = 0.5
-        selected = [{"hashtag": "#football", "score": 0.9}]
-        candidate = {"hashtag": "#footballskills", "score": 0.85}
-        max_sim = max(
-            self._jaccard(candidate["hashtag"], s["hashtag"])
-            for s in selected
-        )
-        penalised = candidate["score"] - diversity_weight * max_sim
-        assert penalised < candidate["score"]
+        recs = [
+            {"hashtag": "#football", "frequency": 3, "score": 0.9},
+            {"hashtag": "#footballskills", "frequency": 3, "score": 0.85},
+        ]
+        reranked = rerank_hashtags_mmr(recs, top_n=2, diversity_weight=0.5)
+        similar = [item for item in reranked if item["hashtag"] == "#footballskills"][0]
+        assert similar["score"] < 0.85
 
     def test_diverse_tag_not_penalised_much(self):
         """A completely different tag should barely be penalised."""
-        diversity_weight = 0.5
-        selected = [{"hashtag": "#football", "score": 0.9}]
-        candidate = {"hashtag": "#cooking", "score": 0.7}
-        max_sim = max(
-            self._jaccard(candidate["hashtag"], s["hashtag"])
-            for s in selected
-        )
-        penalised = candidate["score"] - diversity_weight * max_sim
-        assert penalised > candidate["score"] - 0.15
+        recs = [
+            {"hashtag": "#football", "frequency": 3, "score": 0.9},
+            {"hashtag": "#cooking", "frequency": 3, "score": 0.7},
+        ]
+        reranked = rerank_hashtags_mmr(recs, top_n=2, diversity_weight=0.5)
+        diverse = [item for item in reranked if item["hashtag"] == "#cooking"][0]
+        assert diverse["score"] > 0.55
