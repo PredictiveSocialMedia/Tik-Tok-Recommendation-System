@@ -12,7 +12,7 @@ This repository has evolved from an early TikTok experimentation scaffold into a
 
 The core Python recommendation stack lives in `src/recommendation/`.
 
-For a guided architecture walkthrough, start with [docs/architecture/recommender_overview.md](/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/docs/architecture/recommender_overview.md).
+For a guided architecture walkthrough, start with [docs/architecture/recommender_overview.md](docs/architecture/recommender_overview.md).
 
 ## Architecture At A Glance
 
@@ -48,13 +48,13 @@ Supporting paths:
 
 If you are onboarding to the current implementation, read files in this order:
 
-1. [docs/architecture/recommender_overview.md](/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/docs/architecture/recommender_overview.md)
-2. [src/recommendation/contracts.py](/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/src/recommendation/contracts.py)
-3. [src/recommendation/datamart.py](/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/src/recommendation/datamart.py)
-4. [src/recommendation/fabric/core.py](/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/src/recommendation/fabric/core.py)
-5. [src/recommendation/learning/inference.py](/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/src/recommendation/learning/inference.py)
-6. [src/recommendation/service.py](/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/src/recommendation/service.py)
-7. [frontend/README.md](/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/frontend/README.md)
+1. [docs/architecture/recommender_overview.md](docs/architecture/recommender_overview.md)
+2. [src/recommendation/contracts.py](src/recommendation/contracts.py)
+3. [src/recommendation/datamart.py](src/recommendation/datamart.py)
+4. [src/recommendation/fabric/core.py](src/recommendation/fabric/core.py)
+5. [src/recommendation/learning/inference.py](src/recommendation/learning/inference.py)
+6. [src/recommendation/service.py](src/recommendation/service.py)
+7. [frontend/README.md](frontend/README.md)
 
 ## Common Workflows
 
@@ -74,7 +74,7 @@ If you only need a subset of the stack:
 - scraper only: `pip install -r scraper/requirements.txt`
 - EDA only: `pip install -r eda/requirements-eda.txt`
 
-See [docs/setup_workflows.md](/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/docs/setup_workflows.md) for the workflow-by-workflow setup guide and environment variable reference.
+See [docs/setup_workflows.md](docs/setup_workflows.md) for the workflow-by-workflow setup guide and environment variable reference.
 
 Run the Python test suite:
 

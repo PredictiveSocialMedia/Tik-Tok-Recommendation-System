@@ -1,7 +1,7 @@
 # Module Contracts and Interface Specifications
 
 > Status note: this document reflects an older scaffold-era module map and is no longer the best top-level guide to the repository.
-> For the current recommendation-platform overview, start with [docs/architecture/recommender_overview.md](/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/docs/architecture/recommender_overview.md).
+> For the current recommendation-platform overview, start with [docs/architecture/recommender_overview.md](recommender_overview.md).
 
 ## Overview
 

@@ -170,7 +170,7 @@ If no backend API is deployed, frontend automatically falls back to mock report/
 
 - Frontend/npm dependencies live in `frontend/package.json`.
 - Python service dependencies live in the repo root requirements files.
-- See [docs/setup_workflows.md](/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/docs/setup_workflows.md) for the full cross-stack setup map.
+- See [docs/setup_workflows.md](../docs/setup_workflows.md) for the full cross-stack setup map.
 
 ## Current architecture
 

@@ -73,7 +73,7 @@ python src/research/run_experiment.py
 
 Output shows comparative results for BM25 vs TF-IDF on mock data.
 
-For the current production-oriented architecture, refer to `src/recommendation/README.md` and [docs/architecture/recommender_overview.md](/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/docs/architecture/recommender_overview.md).
+For the current production-oriented architecture, refer to `src/recommendation/README.md` and [docs/architecture/recommender_overview.md](../../docs/architecture/recommender_overview.md).
 
 ## References
 

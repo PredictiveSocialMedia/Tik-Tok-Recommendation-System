@@ -3,7 +3,7 @@
 This folder tracks modelling contracts and design notes that sit alongside the implemented recommendation platform.
 
 > Status note: this is a supporting design workspace, not the primary source of truth for the live runtime.
-> For the current implemented architecture, start with [docs/architecture/recommender_overview.md](/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/docs/architecture/recommender_overview.md) and `src/recommendation/`.
+> For the current implemented architecture, start with [docs/architecture/recommender_overview.md](../docs/architecture/recommender_overview.md) and `src/recommendation/`.
 
 ## Current Scope
 

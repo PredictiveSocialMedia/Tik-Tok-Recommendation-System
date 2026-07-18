@@ -7,7 +7,7 @@ This repository has more than one deployable surface:
 - supporting control-plane jobs in `scripts/`
 
 This document is a short deployment map, not a full production runbook.
-For runtime checks and incident handling, see [docs/recommender_runbook.md](/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/docs/recommender_runbook.md).
+For runtime checks and incident handling, see [docs/recommender_runbook.md](docs/recommender_runbook.md).
 
 ## Deployable Components
 
@@ -111,7 +111,7 @@ Python recommender service environment commonly includes:
 - `FABRIC_CALIBRATION_PATH`
 - `HASHTAG_RECOMMENDER_DIR`
 
-For the fuller frontend integration contract, see [frontend/README.md](/Users/ayoisthegoat/Desktop/Education/Chatbots/Tik-Tok/Tik-Tok-Recommendation-System/frontend/README.md).
+For the fuller frontend integration contract, see [frontend/README.md](frontend/README.md).
 
 ## Recommended Deployment Order
 
